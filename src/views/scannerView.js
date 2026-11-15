@@ -1,8 +1,40 @@
+// src/views/scannerView.js
 import { icon, renderFoodImage } from '../components/icons.js';
 import { store } from '../state/store.js';
 import { ANALYZER_PRESETS } from '../data/catalog.js';
+import {
+  getAllSelectableFoodProfiles,
+  resolveNutritionFromKey,
+} from '../data/yoloFoodCatalog.js';
+import { runDualYoloFoodAnalysis } from '../services/yoloFoodDetector.js';
 import { findAllergyConflicts } from '../utils/nutrition.js';
 import { showToast } from '../components/toast.js';
+
+function renderBoundingBoxes(boxes = []) {
+  if (!boxes || boxes.length === 0) return '';
+  return boxes
+    .map((b) => {
+      const left = Math.round(b.x1 * 100);
+      const top = Math.round(b.y1 * 100);
+      const width = Math.max(12, Math.round((b.x2 - b.x1) * 100));
+      const height = Math.max(12, Math.round((b.y2 - b.y1) * 100));
+      const borderColor = b.color || '#B8F527';
+      return `
+        <div
+          class="absolute pointer-events-none transition-all duration-300 z-10"
+          style="left:${left}%; top:${top}%; width:${width}%; height:${height}%; border: 2px solid ${borderColor}; border-radius: 12px; box-shadow: 0 0 12px ${borderColor}40;"
+        >
+          <span
+            class="absolute -top-6 left-0 px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap shadow"
+            style="background:${borderColor}; color:#090A0C;"
+          >
+            ${b.modelTag}: ${b.label}
+          </span>
+        </div>
+      `;
+    })
+    .join('');
+}
 
 export function renderScannerView(state, ui) {
   const scanner = ui.scannerState;
@@ -22,24 +54,33 @@ export function renderScannerView(state, ui) {
   const estIron = Math.round((baseResult.ironMg || 2.1) * mult * 10) / 10;
 
   const conflicts = findAllergyConflicts(baseResult.allergens, state.profile.allergies);
+  const summary = scanner.detectionSummary;
+  const allSelectableFoods = getAllSelectableFoodProfiles();
 
   return `
     <div class="space-y-8">
       <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <p class="text-xs font-semibold text-[#658C0A] dark:text-[#B8F527]">Simulated AI Vision Recognition</p>
-          <h1 class="font-display text-3xl sm:text-4xl font-bold text-zinc-950 dark:text-white mt-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="px-2.5 py-1 rounded-full bg-[#B8F527]/15 border border-[#B8F527]/40 text-[11px] font-semibold text-[#658C0A] dark:text-[#B8F527]">
+              Model 1: YOLOv8n Pretrained (Food + Dining Bowls)
+            </span>
+            <span class="px-2.5 py-1 rounded-full bg-sky-500/15 border border-sky-500/40 text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+              Model 2: YOLOv8n Custom South Asian &amp; Global Food-20
+            </span>
+          </div>
+          <h1 class="font-display text-3xl sm:text-4xl font-bold text-zinc-950 dark:text-white mt-2">
             Food Photo Analyzer
           </h1>
           <p class="text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 max-w-2xl">
-            Drop a meal photo or choose a preset dish to estimate portion macros, fiber, and potential allergen flags.
+            Upload a food photo to run dual YOLOv8n detection, confirm the identified dish &amp; dining bowl, and unlock full macro analysis.
           </p>
         </div>
-        <span class="text-xs text-zinc-500 dark:text-zinc-400">Approximate visual estimate · Verify allergens</span>
+        <span class="text-xs text-zinc-500 dark:text-zinc-400">Dual-YOLO Ensemble · Verify allergens</span>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <!-- Left Viewfinder & Sample Presets (matching middle scanner reference) -->
+        <!-- Left Viewfinder & Sample Presets -->
         <div class="lg:col-span-6 rounded-3xl bg-white dark:bg-[#131518] border border-zinc-200 dark:border-[#24272F] p-5 sm:p-6 space-y-5">
           <!-- Viewfinder Drop Zone -->
           <div
@@ -48,6 +89,9 @@ export function renderScannerView(state, ui) {
           >
             ${renderFoodImage(previewSrc, baseResult.name, 'w-full h-full object-cover')}
             <div class="absolute inset-0 bg-black/20 pointer-events-none"></div>
+
+            <!-- YOLO Bounding Boxes Overlay -->
+            ${!scanner.isScanning && summary?.boundingBoxes ? renderBoundingBoxes(summary.boundingBoxes) : ''}
 
             <!-- Neon Lime Corner Brackets -->
             <div class="absolute inset-4 pointer-events-none">
@@ -60,12 +104,12 @@ export function renderScannerView(state, ui) {
             ${
               scanner.isScanning
                 ? `
-              <div class="absolute inset-0 bg-black/50 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 z-10">
+              <div class="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 z-20">
                 <div class="absolute inset-x-6 top-6 bottom-6 overflow-hidden pointer-events-none">
                   <div class="h-0.5 w-full bg-[#B8F527] shadow-[0_0_16px_#B8F527] scan-beam"></div>
                 </div>
-                <span class="px-4 py-2 rounded-full bg-zinc-950/90 border border-[#B8F527]/60 text-[#B8F527] text-xs font-semibold">
-                  Scanning ingredients &amp; portion density...
+                <span class="px-4 py-2 rounded-full bg-zinc-950/90 border border-[#B8F527]/60 text-[#B8F527] text-xs font-semibold text-center">
+                  Running YOLOv8n Pretrained + Custom Food-20...
                 </span>
               </div>
             `
@@ -91,7 +135,7 @@ export function renderScannerView(state, ui) {
               class="py-3 px-6 rounded-full bg-[#B8F527] hover:bg-[#A8E51B] disabled:opacity-60 text-zinc-950 text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
             >
               ${icon('scan', 'w-4 h-4')}
-              <span>${scanner.isScanning ? 'Scanning...' : 'Scan Food'}</span>
+              <span>${scanner.isScanning ? 'Analyzing...' : 'Re-Analyze Photo'}</span>
             </button>
           </div>
 
@@ -125,7 +169,7 @@ export function renderScannerView(state, ui) {
           </div>
         </div>
 
-        <!-- Right Analyzed Dish Card (matching right reference phone) -->
+        <!-- Right Column: Step 1 (Confirmation Gate) OR Step 2 (Confirmed Macro Analysis) -->
         <div class="lg:col-span-6 rounded-3xl bg-white dark:bg-[#131518] border border-zinc-200 dark:border-[#24272F] overflow-hidden">
           ${
             scanner.isScanning
@@ -141,13 +185,116 @@ export function renderScannerView(state, ui) {
               <div class="h-28 rounded-2xl skeleton-shimmer"></div>
             </div>
           `
+              : scanner.awaitingConfirmation && summary
+              ? `
+            <!-- STEP 1: DUAL-MODEL DETECTION CONFIRMATION PANEL -->
+            <div class="p-6 space-y-5">
+              <div class="p-4 rounded-2xl bg-[#B8F527]/10 border border-[#B8F527]/40 space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold uppercase tracking-wider text-[#658C0A] dark:text-[#B8F527]">
+                    Step 1 · Confirm Detected Food
+                  </span>
+                  <span class="text-[11px] font-mono-num text-zinc-500 dark:text-zinc-400">
+                    Container: ${summary.containerLabel}
+                  </span>
+                </div>
+                <h2 class="font-display text-xl font-bold text-zinc-950 dark:text-white">
+                  Both YOLOv8n models analyzed your photo
+                </h2>
+                <p class="text-xs text-zinc-600 dark:text-zinc-300">
+                  Please verify the detected dish below (or pick the exact match) and click <strong>Confirm &amp; Continue</strong> to calculate calories, macros, and allergen alerts.
+                </p>
+              </div>
+
+              <!-- Detected Candidates from Dual Models -->
+              <div class="space-y-2.5">
+                <p class="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                  Detected Food Candidates (Click to Select):
+                </p>
+                <div class="space-y-2">
+                  ${summary.candidates
+                    .map((cand) => {
+                      const isChosen =
+                        (scanner.selectedCandidateKey || summary.selectedCandidateKey) === cand.key;
+                      return `
+                        <button
+                          type="button"
+                          data-candidate-key="${cand.key}"
+                          class="w-full p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 ${
+                            isChosen
+                              ? 'border-[#B8F527] bg-[#B8F527]/12 shadow-sm'
+                              : 'border-zinc-200 dark:border-[#262932] bg-zinc-50 dark:bg-[#191C22] hover:border-zinc-400'
+                          }"
+                        >
+                          <div>
+                            <div class="flex items-center gap-2">
+                              <span class="text-sm font-bold text-zinc-950 dark:text-white">${cand.name}</span>
+                              <span class="px-2 py-0.5 rounded-full text-[10px] font-mono-num font-semibold bg-zinc-200 dark:bg-[#262932] text-zinc-800 dark:text-[#B8F527]">
+                                ${cand.confidence}% match
+                              </span>
+                            </div>
+                            <p class="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                              Detected by: ${cand.modelSource}
+                            </p>
+                          </div>
+                          <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            isChosen ? 'border-[#B8F527] bg-[#B8F527] text-zinc-950' : 'border-zinc-400'
+                          }">
+                            ${isChosen ? '✓' : ''}
+                          </div>
+                        </button>
+                      `;
+                    })
+                    .join('')}
+                </div>
+              </div>
+
+              <!-- Manual Override Dropdown (in case user wants to pick another South Asian/Global dish) -->
+              <div class="space-y-1.5 pt-1">
+                <label for="manual-food-override" class="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                  Not exact? Override from South Asian &amp; Global Food-20 Catalog:
+                </label>
+                <select
+                  id="manual-food-override"
+                  class="w-full px-4 py-2.5 rounded-xl bg-zinc-100 dark:bg-[#1C1F25] border border-zinc-200 dark:border-[#2B2E36] text-xs font-semibold text-zinc-900 dark:text-white"
+                >
+                  ${allSelectableFoods
+                    .map((item) => {
+                      const activeKey = scanner.selectedCandidateKey || summary.selectedCandidateKey;
+                      return `<option value="${item.key}" ${activeKey === item.key ? 'selected' : ''}>${item.name} (~${item.calories} kcal)</option>`;
+                    })
+                    .join('')}
+                </select>
+              </div>
+
+              <!-- Confirm & Proceed CTA -->
+              <div class="pt-2">
+                <button
+                  type="button"
+                  data-action="confirm-detected-food"
+                  class="w-full py-3.5 px-6 rounded-full bg-[#B8F527] hover:bg-[#A8E51B] text-zinc-950 text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors shadow-md"
+                >
+                  ${icon('check', 'w-4 h-4')}
+                  <span>Confirm Food &amp; Load Nutrition Breakdown</span>
+                </button>
+              </div>
+            </div>
+          `
               : `
+            <!-- STEP 2: CONFIRMED DISH NUTRITION & LOGGING -->
             <div class="p-6 space-y-6">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p class="text-xs font-medium text-[#658C0A] dark:text-[#B8F527]">
-                    Recognized Dish · ${baseResult.confidence}% confidence (approx.)
-                  </p>
+                  <div class="flex items-center gap-2">
+                    <p class="text-xs font-medium text-[#658C0A] dark:text-[#B8F527]">
+                      Confirmed Dish · ${baseResult.confidence}% confidence
+                    </p>
+                    ${
+                      summary
+                        ? `<button type="button" data-action="reopen-confirmation" class="text-[11px] underline text-zinc-500 hover:text-zinc-900 dark:hover:text-white">Change food</button>`
+                        : ''
+                    }
+                  </div>
                   <h2 class="font-display text-2xl font-bold text-zinc-950 dark:text-white mt-1">${baseResult.name}</h2>
                   <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                     Estimated portion: ${baseResult.portion} (${mult}x)
@@ -266,54 +413,75 @@ export function renderScannerView(state, ui) {
   `;
 }
 
-function triggerSimulatedScan(customDataUrl = null, fileName = '') {
+async function triggerDualYoloScan(customDataUrl = null, fileName = '') {
   const current = store.getUI().scannerState;
+  const activePreset =
+    ANALYZER_PRESETS.find((p) => p.id === current.selectedPresetId) || ANALYZER_PRESETS[0];
+
+  const nextCustomUpload = customDataUrl
+    ? { dataUrl: customDataUrl, fileName }
+    : current.customUpload;
+
+  const targetImageSrc = nextCustomUpload?.dataUrl || activePreset.image;
+  const targetFileName = nextCustomUpload?.fileName || activePreset.name;
+
   store.setUI({
     scannerState: {
       ...current,
       isScanning: true,
-      customUpload: customDataUrl ? { dataUrl: customDataUrl, fileName } : current.customUpload,
+      awaitingConfirmation: true,
+      isConfirmed: false,
+      customUpload: nextCustomUpload,
     },
   });
 
-  setTimeout(() => {
-    const latest = store.getUI().scannerState;
-    let matched =
-      ANALYZER_PRESETS.find((p) => p.id === latest.selectedPresetId) || ANALYZER_PRESETS[0];
+  try {
+    const summary = await runDualYoloFoodAnalysis(targetImageSrc, {
+      fileName: targetFileName,
+      presetId: current.selectedPresetId,
+    });
 
-    if (latest.customUpload?.fileName) {
-      const fn = latest.customUpload.fileName.toLowerCase();
-      if (fn.includes('egg') || fn.includes('avo') || fn.includes('toast')) {
-        matched = ANALYZER_PRESETS[1];
-      } else if (fn.includes('chicken') || fn.includes('bowl') || fn.includes('salad')) {
-        matched = ANALYZER_PRESETS[2];
-      } else if (fn.includes('yogurt') || fn.includes('berry')) {
-        matched = ANALYZER_PRESETS[3];
-      } else {
-        matched = {
-          ...ANALYZER_PRESETS[2],
-          name: 'Custom Uploaded Meal Plate',
-          confidence: 88,
-          image: latest.customUpload.dataUrl,
-        };
-      }
-    }
+    const latest = store.getUI().scannerState;
+    const topKey = summary.selectedCandidateKey;
+    const initialProfile = resolveNutritionFromKey(
+      topKey,
+      summary.candidates[0]?.confidence || 92,
+      summary.containerLabel
+    );
 
     store.setUI({
       scannerState: {
         ...latest,
         isScanning: false,
+        awaitingConfirmation: true,
+        isConfirmed: false,
+        detectionSummary: summary,
+        selectedCandidateKey: topKey,
         result: {
-          ...matched,
-          image: latest.customUpload?.dataUrl || matched.image,
+          ...initialProfile,
+          image: targetImageSrc,
         },
-        selectedMealType: matched.mealType,
+        selectedMealType: initialProfile.mealType,
       },
     });
-  }, 850);
+  } catch (err) {
+    console.error('YOLO detection error:', err);
+    showToast('Could not analyze photo, showing fallback preset', 'warning');
+    const latest = store.getUI().scannerState;
+    store.setUI({
+      scannerState: {
+        ...latest,
+        isScanning: false,
+        awaitingConfirmation: false,
+        isConfirmed: true,
+        result: activePreset,
+      },
+    });
+  }
 }
 
 export function bindScannerViewEvents(root) {
+  // Preset Buttons
   root.querySelectorAll('[data-preset]').forEach((btn) =>
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-preset');
@@ -326,16 +494,87 @@ export function bindScannerViewEvents(root) {
           portionMultiplier: 1,
           selectedMealType: preset.mealType,
           result: preset,
+          awaitingConfirmation: false,
+          isConfirmed: true,
+          detectionSummary: null,
         },
       });
-      triggerSimulatedScan();
     })
   );
 
+  // Run Scan Button
   root.querySelector('[data-action="run-scan"]')?.addEventListener('click', () => {
-    triggerSimulatedScan();
+    triggerDualYoloScan();
   });
 
+  // Candidate Selection Chips in Step 1
+  root.querySelectorAll('[data-candidate-key]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const key = btn.getAttribute('data-candidate-key');
+      const current = store.getUI().scannerState;
+      store.setUI({
+        scannerState: {
+          ...current,
+          selectedCandidateKey: key,
+        },
+      });
+    })
+  );
+
+  // Manual Override Dropdown in Step 1
+  root.querySelector('#manual-food-override')?.addEventListener('change', (e) => {
+    const key = e.target.value;
+    const current = store.getUI().scannerState;
+    store.setUI({
+      scannerState: {
+        ...current,
+        selectedCandidateKey: key,
+      },
+    });
+  });
+
+  // Confirm Detected Food Button (Moves from Step 1 -> Step 2)
+  root.querySelector('[data-action="confirm-detected-food"]')?.addEventListener('click', () => {
+    const current = store.getUI().scannerState;
+    const summary = current.detectionSummary;
+    const chosenKey = current.selectedCandidateKey || summary?.selectedCandidateKey || 'biryani';
+    const matchedCand = summary?.candidates?.find((c) => c.key === chosenKey);
+    const conf = matchedCand?.confidence || 92;
+    const containerLabel = summary?.containerLabel || 'Dining Bowl';
+
+    const confirmedProfile = resolveNutritionFromKey(chosenKey, conf, containerLabel);
+    const activePreset =
+      ANALYZER_PRESETS.find((p) => p.id === current.selectedPresetId) || ANALYZER_PRESETS[0];
+
+    store.setUI({
+      scannerState: {
+        ...current,
+        awaitingConfirmation: false,
+        isConfirmed: true,
+        result: {
+          ...confirmedProfile,
+          image: current.customUpload?.dataUrl || activePreset.image,
+        },
+        selectedMealType: confirmedProfile.mealType,
+      },
+    });
+
+    showToast(`Confirmed: ${confirmedProfile.name}`);
+  });
+
+  // Reopen Confirmation Link
+  root.querySelector('[data-action="reopen-confirmation"]')?.addEventListener('click', () => {
+    const current = store.getUI().scannerState;
+    store.setUI({
+      scannerState: {
+        ...current,
+        awaitingConfirmation: true,
+        isConfirmed: false,
+      },
+    });
+  });
+
+  // Portion Multiplier Buttons
   root.querySelectorAll('[data-portion]').forEach((btn) =>
     btn.addEventListener('click', () => {
       const mult = Number(btn.getAttribute('data-portion')) || 1;
@@ -348,6 +587,7 @@ export function bindScannerViewEvents(root) {
     })
   );
 
+  // Meal Slot Selector
   root.querySelector('#scan-meal-type')?.addEventListener('change', (e) => {
     store.setUI({
       scannerState: {
@@ -357,6 +597,7 @@ export function bindScannerViewEvents(root) {
     });
   });
 
+  // File Upload Handler
   const handleFile = (file) => {
     if (!file || !file.type.startsWith('image/')) {
       showToast('Please select a valid image file', 'warning');
@@ -364,7 +605,7 @@ export function bindScannerViewEvents(root) {
     }
     const reader = new FileReader();
     reader.onload = () => {
-      triggerSimulatedScan(reader.result, file.name);
+      triggerDualYoloScan(reader.result, file.name);
     };
     reader.readAsDataURL(file);
   };
@@ -391,6 +632,7 @@ export function bindScannerViewEvents(root) {
     });
   }
 
+  // Add to My Log
   root.querySelector('[data-action="add-scanned-log"]')?.addEventListener('click', async () => {
     const scanner = store.getUI().scannerState;
     const preset =
