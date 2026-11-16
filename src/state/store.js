@@ -1,6 +1,7 @@
 import {
   calculateNutritionPlan,
   findAllergyConflicts,
+  getCurrentDayShortName,
   getOffsetDateISO,
   getTodayISO,
 } from '../utils/nutrition.js';
@@ -246,7 +247,7 @@ export function createInitialState(preservedTheme = readStoredTheme()) {
     isAuthenticated: false,
     isDemoMode: false,
     activeView: 'home',
-    selectedPlannerDay: 'Wed',
+    selectedPlannerDay: getCurrentDayShortName(),
     selectedDashboardDay: today,
     chartRangeDays: 7,
     nutriNoteIndex: 0,
@@ -318,6 +319,7 @@ function loadDemoOrPublicState() {
       ...fallback,
       ...parsed,
       authUserId: null,
+      selectedPlannerDay: fallback.selectedPlannerDay,
       activeView:
         PRIVATE_VIEWS.has(parsed.activeView) && !parsed.isDemoMode
           ? 'home'
@@ -474,6 +476,7 @@ class NutriStore {
         this._hydratedUserId = user.id;
         this.setState({
           ...workspace,
+          selectedPlannerDay: getCurrentDayShortName(),
           authUserId: user.id,
           isAuthenticated: true,
           isDemoMode: false,
@@ -636,6 +639,7 @@ class NutriStore {
       authUserId: null,
       isAuthenticated: true,
       isDemoMode: true,
+      selectedPlannerDay: getCurrentDayShortName(),
       profile: {
         ...prev.profile,
         name: cleanName,

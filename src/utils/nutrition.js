@@ -192,3 +192,9 @@ export function getOffsetDateISO(daysAgo) {
   const dy = String(d.getDate()).padStart(2, '0');
   return `${yr}-${mo}-${dy}`;
 }
+
+export function getCurrentDayShortName(date = new Date()) {
+  const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const idx = date instanceof Date && !Number.isNaN(date.getTime()) ? date.getDay() : new Date().getDay();
+  return shortDays[idx] || 'Mon';
+}

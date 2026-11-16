@@ -11,6 +11,7 @@ import {
   calculateNutritionPlan,
   findAllergyConflicts,
   summarizeDailyLogs,
+  getCurrentDayShortName,
 } from './nutrition.js';
 
 test('unit conversions convert accurately between imperial and metric', () => {
@@ -84,4 +85,10 @@ test('summarizeDailyLogs totals macros for a specific date', () => {
   assert.equal(today.calories, 1000);
   assert.equal(today.proteinG, 66);
   assert.equal(today.count, 2);
+});
+
+test('getCurrentDayShortName maps Date weekday indices to Mon-Sun short names', () => {
+  assert.equal(getCurrentDayShortName(new Date(2026, 10, 16)), 'Mon');
+  assert.equal(getCurrentDayShortName(new Date(2026, 10, 21)), 'Sat');
+  assert.equal(getCurrentDayShortName(new Date(2026, 10, 22)), 'Sun');
 });

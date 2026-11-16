@@ -22,22 +22,20 @@ export function renderHomeView(state) {
   const cVal = state.isAuthenticated ? todaySummary.carbsG : Math.round(targets.carbsG * 0.78);
   const fVal = state.isAuthenticated ? todaySummary.fatG : Math.round(targets.fatG * 0.68);
 
-  const dayButtons = DAYS_OF_WEEK.slice(0, 5)
-    .map((d) => {
-      const active = state.selectedPlannerDay === d;
-      return `
+  const dayButtons = DAYS_OF_WEEK.map((d) => {
+    const active = state.selectedPlannerDay === d;
+    return `
         <button
           type="button"
           data-hero-day="${d}"
-          class="px-3 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+          class="flex-1 min-w-[38px] sm:min-w-0 px-1.5 sm:px-2.5 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold text-center transition-colors whitespace-nowrap shrink-0 ${
             active
               ? 'bg-[#B8F527] text-zinc-950'
               : 'bg-zinc-200 dark:bg-[#22252C] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-[#2C3039]'
           }"
         >${d}</button>
       `;
-    })
-    .join('');
+  }).join('');
 
   return `
     <div class="space-y-10 sm:space-y-12">
@@ -122,7 +120,7 @@ export function renderHomeView(state) {
             </div>
 
             <!-- Day Pills -->
-            <div class="flex items-center justify-between gap-1.5 overflow-x-auto pb-0.5">
+            <div class="flex items-center justify-between gap-1 sm:gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Days of the week">
               ${dayButtons}
             </div>
 
