@@ -117,7 +117,7 @@ export function renderHomeView(state) {
                 </button>
               </div>
               <div class="col-span-5 min-h-[104px]">
-                ${renderFoodImage(FOOD_IMAGES.salmon, 'Grilled Atlantic salmon focus meal', 'w-full h-full object-cover')}
+                ${renderFoodImage(FOOD_IMAGES.bdFishCurry, 'Traditional Bangladeshi fish curry and steamed rice meal', 'w-full h-full object-cover')}
               </div>
             </div>
 

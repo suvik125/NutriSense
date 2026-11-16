@@ -386,12 +386,12 @@ export function renderScannerView(state, ui) {
                 <label for="scan-meal-type" class="sr-only">Meal slot</label>
                 <select
                   id="scan-meal-type"
-                  class="px-4 py-3 rounded-full bg-zinc-100 dark:bg-[#1C1F25] border border-zinc-200 dark:border-[#2B2E36] text-xs font-semibold text-zinc-900 dark:text-white"
+                  class="px-4 py-3 rounded-full bg-[#B8F527] hover:bg-[#A8E51B] border border-[#B8F527] text-xs font-bold text-zinc-950 shadow-[0_0_16px_rgba(184,245,39,0.45)] focus:outline-none focus:ring-2 focus:ring-[#B8F527] cursor-pointer transition-colors"
                 >
                   ${['Breakfast', 'Lunch', 'Snack', 'Dinner']
                     .map(
                       (slot) =>
-                        `<option value="${slot}" ${(scanner.selectedMealType || baseResult.mealType) === slot ? 'selected' : ''}>${slot}</option>`
+                        `<option value="${slot}" class="bg-white dark:bg-[#131518] text-zinc-950 dark:text-white font-semibold" ${(scanner.selectedMealType || baseResult.mealType) === slot ? 'selected' : ''}>${slot}</option>`
                     )
                     .join('')}
                 </select>
