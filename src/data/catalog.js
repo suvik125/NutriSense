@@ -720,10 +720,14 @@ export const PRODUCT_INSIGHTS = {
 };
 
 export const ASSISTANT_QUICK_REPLIES = [
-  'How should I adjust protein for fat loss?',
-  'What should I eat with a stomach upset?',
-  'How accurate is food photo scanning?',
-  'Tips for lowering sodium intake?',
+  '📊 Daily Report',
+  '📈 Weekly Report',
+  '📅 Monthly Report',
+  '🔄 Swap today lunch',
+  '🍲 Kacchi Biryani calories?',
+  '🐟 Shorshe Ilish nutrition?',
+  '🩸 Diabetes meal tips',
+  '💧 Add 1 glass water',
 ];
 
 export const ASSISTANT_QUICK_REPLIES = [
