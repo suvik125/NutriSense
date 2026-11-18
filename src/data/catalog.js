@@ -726,23 +726,57 @@ export const ASSISTANT_QUICK_REPLIES = [
   'Tips for lowering sodium intake?',
 ];
 
-export function generateAssistantReply(userMessage, state) {
+export const ASSISTANT_QUICK_REPLIES = [
+  'How should I adjust protein for fat loss?',
+  'What should I eat with a stomach upset?',
+  'How accurate is food photo scanning?',
+  'Tips for lowering sodium intake?',
+];
+
+export async function generateAssistantReply(userMessage, state) {
   const q = String(userMessage || '').toLowerCase();
   const targetKcal = state?.nutritionTargets?.targetCalories || 2150;
   const proteinG = state?.nutritionTargets?.proteinG || 150;
   const illness = state?.profile?.illnessMode || 'none';
 
-  if (q.includes('protein') || q.includes('fat loss') || q.includes('muscle')) {
-    return `Based on your current daily target of ~${targetKcal} kcal, your plan sets protein around ~${proteinG}g/day. Aiming for 25–40g per meal (such as grilled salmon, Greek yogurt, or chicken quinoa bowls) helps preserve lean mass and satiety. These estimates are approximate—adjust with a registered dietitian for clinical needs.`;
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+  if (!apiKey) {
+    if (q.includes('protein') || q.includes('fat loss') || q.includes('muscle')) {
+      return `Based on your current daily target of ~${targetKcal} kcal, your plan sets protein around ~${proteinG}g/day. Aiming for 25–40g per meal helps preserve lean mass.`;
+    }
+    if (q.includes('stomach') || q.includes('unwell') || q.includes('fever') || q.includes('sick') || q.includes('cold')) {
+      return `When you're feeling unwell${illness !== 'none' ? ` (currently set to ${illness})` : ''}, gentle hydration and easy-to-digest carbohydrates matter most.`;
+    }
+    return `Your active profile targets ~${targetKcal} kcal/day (${proteinG}g protein). Please make sure VITE_GEMINI_API_KEY is configured in your environment variables!`;
   }
-  if (q.includes('stomach') || q.includes('unwell') || q.includes('fever') || q.includes('sick') || q.includes('cold')) {
-    return `When you're feeling unwell${illness !== 'none' ? ` (currently set to ${illness})` : ''}, gentle hydration and easy-to-digest carbohydrates matter most. Warm ginger-rice broths, plain yogurt, or poached eggs on toast reduce digestive strain. You can switch on "I'm Feeling Unwell" in the Meal Planner to adapt your week automatically. Always consult a healthcare professional for persistent or severe symptoms.`;
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    
+    const systemPrompt = `You are NutriSense AI, a helpful nutrition and wellness assistant tailored for Bangladeshi users. 
+    User Profile: Target Calories ~${targetKcal} kcal, Protein ~${proteinG}g, Current Illness Mode: ${illness}. 
+    Keep responses concise, practical, and focused on healthy eating and traditional local foods where appropriate. Always include a brief disclaimer that this is informational, not medical advice.`;
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `${systemPrompt}\n\nUser Question: ${userMessage}` }]
+          }
+        ]
+      })
+    });
+
+    const data = await response.json();
+    const aiReply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    return aiReply || "I'm having trouble connecting right now. Please try again!";
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return "Sorry, something went wrong while fetching the AI response.";
   }
-  if (q.includes('scan') || q.includes('photo') || q.includes('accurate') || q.includes('camera')) {
-    return `Photo-based food analysis provides approximate portion, calorie, and macro estimates based on visual dish recognition. Hidden cooking oils, sauces, and exact gram weights can vary by 15–25%, so you can adjust portion multipliers (0.5x–1.5x) before logging and verify critical allergen ingredients manually.`;
-  }
-  if (q.includes('sodium') || q.includes('hypertension') || q.includes('blood pressure')) {
-    return `Your current sodium ceiling is set to ${state?.nutritionTargets?.sodiumMg || 2300}mg/day. Favoring fresh herbs, charred lemon, and roasted whole foods over packaged sauces is the fastest way to lower sodium without losing flavor.`;
-  }
-  return `Your active profile targets ~${targetKcal} kcal/day (${proteinG}g protein, ${state?.nutritionTargets?.carbsG || 220}g carbs, ${state?.nutritionTargets?.fatG || 68}g fat). You can fine-tune biometrics in the Calculator, swap meals in the Planner, or scan a dish photo to update today's progress ring. Note: NutriSense estimates are informational and not medical advice.`;
 }
