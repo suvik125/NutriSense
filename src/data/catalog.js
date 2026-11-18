@@ -21,6 +21,7 @@ import bdThroatDalRiceImg from '../assets/images/bd_throat_dal_rice_179497682060
 import bdThroatGingerInfusionImg from '../assets/images/bd_throat_ginger_infusion_1794976821973.jpg';
 import bdThroatFishBrothRiceImg from '../assets/images/bd_throat_fish_broth_rice_1794976822839.jpg';
 import bdMuriChanachurImg from '../assets/images/bd_muri_chanachur_1794978390797.jpg';
+import bdWarmGingerTeaRutiImg from '../assets/images/bd_warm_ginger_tea_ruti.jpg';
 
 export const FOOD_IMAGES = {
   salmon: salmonImg,
@@ -46,6 +47,7 @@ export const FOOD_IMAGES = {
   bdThroatGingerInfusion: bdThroatGingerInfusionImg,
   bdThroatFishBrothRice: bdThroatFishBrothRiceImg,
   bdMuriChanachur: bdMuriChanachurImg,
+  bdWarmGingerTeaRuti: bdWarmGingerTeaRutiImg,
 };
 
 export const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -355,12 +357,13 @@ export const RECOVERY_MEALS = {
     breakfast: {
       id: 'rec-cold-bk',
       name: 'Warm Ginger Tea & Light Ruti',
+      calories: 149,
       proteinG: 3,
       carbsG: 32,
       fatG: 1,
       fiberG: 1,
       portion: '250g',
-      image: bdColdTeaRutiImg,
+      image: bdWarmGingerTeaRutiImg,
       allergens: ['Gluten'],
       prepMins: 10,
       tags: ['Soothing Warmth'],
@@ -562,7 +565,7 @@ export const RECOVERY_MEALS = {
       fatG: 4,
       fiberG: 3,
       portion: '200g',
-      image: bdPithaImg,
+      image: bdMuriChanachurImg,
       allergens: [],
       prepMins: 4,
       tags: ['Quick Vitality'],
