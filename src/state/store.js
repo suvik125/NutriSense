@@ -1,4 +1,3 @@
-// src/state/store.js
 import {
   calculateNutritionPlan,
   findAllergyConflicts,
@@ -12,6 +11,7 @@ import {
   ILLNESS_OPTIONS,
   MEAL_CATALOG,
   RECOVERY_MEALS,
+  generateAssistantReply,
 } from '../data/catalog.js';
 import { supabase } from '../supabaseClient.js';
 import {
@@ -30,7 +30,6 @@ import {
   upsertProfileHealthAndTargets,
   upsertSingleMealPlanItem,
 } from '../services/supabaseDb.js';
-import { processRagChatTurn } from '../services/ragChatbot.js';
 import { showToast } from '../components/toast.js';
 import {
   DEFAULT_HYDRATION_GOAL,
@@ -393,7 +392,7 @@ export function createInitialState(preservedTheme = readStoredTheme()) {
       {
         id: 'chat-welcome',
         role: 'assistant',
-        text: 'Hello! I am your NutriSense RAG Assistant. Ask me about Bangladeshi dish calories (like Kacchi Biryani or Shorshe Ilish), tell me to **"Swap today lunch"**, log foods directly, or generate your **Daily, Weekly, and Monthly PDF Reports**.',
+        text: 'Hello! Ask me about macro targets, gentle foods when feeling unwell, or sodium and fiber balance. Nutrition estimates are informational and not medical advice.',
         timeLabel: 'Now',
       },
     ],
@@ -1251,7 +1250,7 @@ class NutriStore {
     }
   }
 
-  async sendChatMessage(text) {
+  sendChatMessage(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed) return;
     const nowLabel = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -1275,52 +1274,33 @@ class NutriStore {
         });
     }
 
-    setTimeout(async () => {
-      try {
-        const ragResult = await processRagChatTurn(trimmed, this);
-        const replyTime = new Date().toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-        const assistantMsg = {
-          id: `chat-a-${Date.now()}`,
-          role: 'assistant',
-          text: ragResult.text,
-          sources: ragResult.sources || [],
-          actionBadge: ragResult.actionBadge || null,
-          pdfReportPeriod: ragResult.pdfReportPeriod || null,
-          timeLabel: replyTime,
-        };
-        this.setState((prev) => ({
-          chatHistory: [...prev.chatHistory, assistantMsg],
-        }));
-        this.setUI({ chatTyping: false });
+    setTimeout(() => {
+      const reply = generateAssistantReply(trimmed, this.state);
+      const replyTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const assistantMsg = {
+        id: `chat-a-${Date.now()}`,
+        role: 'assistant',
+        text: reply,
+        timeLabel: replyTime,
+      };
+      this.setState((prev) => ({
+        chatHistory: [...prev.chatHistory, assistantMsg],
+      }));
+      this.setUI({ chatTyping: false });
 
-        if (this.isSupabaseUser()) {
-          const userId = this.state.authUserId;
-          insertChatMessage(userId, assistantMsg)
-            .then((saved) => {
-              this.setState((prev) => ({
-                chatHistory: prev.chatHistory.map((m) =>
-                  m.id === assistantMsg.id
-                    ? {
-                        ...saved,
-                        sources: assistantMsg.sources,
-                        actionBadge: assistantMsg.actionBadge,
-                        pdfReportPeriod: assistantMsg.pdfReportPeriod,
-                      }
-                    : m
-                ),
-              }));
-            })
-            .catch((err) => {
-              this.setUI({ syncError: err?.message || 'Failed to save assistant reply.' });
-            });
-        }
-      } catch {
-        this.setUI({ chatTyping: false });
+      if (this.isSupabaseUser()) {
+        const userId = this.state.authUserId;
+        insertChatMessage(userId, assistantMsg)
+          .then((saved) => {
+            this.setState((prev) => ({
+              chatHistory: prev.chatHistory.map((m) => (m.id === assistantMsg.id ? saved : m)),
+            }));
+          })
+          .catch((err) => {
+            this.setUI({ syncError: err?.message || 'Failed to save assistant reply.' });
+          });
       }
-    }, 320);
+    }, 550);
   }
 
   cycleNutriNote(delta = 1) {
