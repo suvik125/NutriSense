@@ -15,7 +15,9 @@ import {
 } from '../data/catalog.js';
 import { supabase } from '../supabaseClient.js';
 import {
+  clearNotificationRows,
   deleteFoodLogRow,
+  deleteNotificationRow,
   fetchUserWorkspace,
   insertChatMessage,
   insertFoodLog,
@@ -29,11 +31,95 @@ import {
   upsertSingleMealPlanItem,
 } from '../services/supabaseDb.js';
 import { showToast } from '../components/toast.js';
+import {
+  DEFAULT_HYDRATION_GOAL,
+  DEFAULT_HYDRATION_INTERVAL_HOURS,
+  clampWaterGlasses,
+  formatHHMM,
+  isHydrationReminderDue,
+  isWithinQuietHours,
+  shouldSendBrowserPush,
+} from '../utils/notifications.js';
+import {
+  playNotificationChime,
+  triggerBrowserNotification,
+  triggerNotificationVibration,
+} from '../utils/notificationEffects.js';
 
 const LEGACY_STORAGE_KEY = 'nutrisense_state_v1';
 const DEMO_STORAGE_KEY = 'nutrisense_demo_state_v1';
 const THEME_STORAGE_KEY = 'nutrisense_theme';
+const NOTIFICATIONS_STORAGE_KEY = 'nutrisense_notifications_v1';
+const NOTIF_PREFS_STORAGE_KEY = 'nutrisense_notification_prefs_v1';
+const HYDRATION_STORAGE_KEY = 'nutrisense_hydration_v1';
+const MEAL_REMINDER_SENT_KEY = 'nutrisense_meal_reminders_sent_v1';
 const PRIVATE_VIEWS = new Set(['myfoods']);
+
+function readStoredJSON(key) {
+  if (typeof localStorage === 'undefined') {
+    return { exists: false, value: null };
+  }
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return { exists: false, value: null };
+    return { exists: true, value: JSON.parse(raw) };
+  } catch {
+    return { exists: false, value: null };
+  }
+}
+
+function writeStoredJSON(key, value) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function buildDefaultHydration(today = getTodayISO()) {
+  return {
+    dateISO: today,
+    glasses: 0,
+    goalGlasses: DEFAULT_HYDRATION_GOAL,
+    lastReminderAt: Date.now(),
+  };
+}
+
+function readStoredHydration(today = getTodayISO()) {
+  const { exists, value } = readStoredJSON(HYDRATION_STORAGE_KEY);
+  if (!exists || !value || typeof value !== 'object') {
+    return buildDefaultHydration(today);
+  }
+  const goalGlasses = Number(value.goalGlasses) || DEFAULT_HYDRATION_GOAL;
+  const lastReminderAt = Number(value.lastReminderAt) || Date.now();
+  if (value.dateISO !== today) {
+    return {
+      dateISO: today,
+      glasses: 0,
+      goalGlasses,
+      lastReminderAt,
+    };
+  }
+  return {
+    dateISO: today,
+    glasses: clampWaterGlasses(value.glasses, 16),
+    goalGlasses,
+    lastReminderAt,
+  };
+}
+
+function readLocalBrowserPrefs() {
+  const { exists, value } = readStoredJSON(NOTIF_PREFS_STORAGE_KEY);
+  if (!exists || !value || typeof value !== 'object') return {};
+  return {
+    browserPushEnabled: Boolean(value.browserPushEnabled),
+    soundVibrationEnabled: Boolean(value.soundVibrationEnabled),
+    hydrationIntervalEnabled: Boolean(value.hydrationIntervalEnabled),
+    hydrationReminderIntervalHours:
+      Number(value.hydrationReminderIntervalHours) || DEFAULT_HYDRATION_INTERVAL_HOURS,
+  };
+}
 
 function pickSafeMeal(slot, userAllergies = [], offset = 0, avoidId = null) {
   const options = MEAL_CATALOG[slot] || [];
@@ -199,6 +285,7 @@ function createSeedFoodLogs() {
 }
 
 function readStoredTheme() {
+  if (typeof localStorage === 'undefined') return 'dark';
   try {
     const t = localStorage.getItem(THEME_STORAGE_KEY);
     return t === 'light' ? 'light' : 'dark';
@@ -289,6 +376,10 @@ export function createInitialState(preservedTheme = readStoredTheme()) {
       quietHoursEnabled: true,
       quietStart: '22:00',
       quietEnd: '07:00',
+      browserPushEnabled: false,
+      soundVibrationEnabled: false,
+      hydrationIntervalEnabled: false,
+      hydrationReminderIntervalHours: DEFAULT_HYDRATION_INTERVAL_HOURS,
       mealTimes: {
         Breakfast: '08:00',
         Lunch: '12:45',
@@ -296,6 +387,7 @@ export function createInitialState(preservedTheme = readStoredTheme()) {
         Dinner: '19:00',
       },
     },
+    hydration: buildDefaultHydration(today),
     chatHistory: [
       {
         id: 'chat-welcome',
@@ -307,15 +399,47 @@ export function createInitialState(preservedTheme = readStoredTheme()) {
   };
 }
 
+function mergeNotificationStateFromLocalStorage(baseState) {
+  const today = getTodayISO();
+  const storedNotifs = readStoredJSON(NOTIFICATIONS_STORAGE_KEY);
+  const storedPrefs = readStoredJSON(NOTIF_PREFS_STORAGE_KEY);
+  const storedHydration = readStoredHydration(today);
+
+  const nextNotifications =
+    storedNotifs.exists && Array.isArray(storedNotifs.value)
+      ? storedNotifs.value
+      : baseState.notifications;
+
+  const prefOverride =
+    storedPrefs.exists && storedPrefs.value && typeof storedPrefs.value === 'object'
+      ? storedPrefs.value
+      : {};
+
+  return {
+    ...baseState,
+    notifications: nextNotifications,
+    hydration: storedHydration,
+    notificationPrefs: {
+      ...baseState.notificationPrefs,
+      ...prefOverride,
+      mealTimes: {
+        ...baseState.notificationPrefs.mealTimes,
+        ...(prefOverride.mealTimes || {}),
+      },
+    },
+  };
+}
+
 function loadDemoOrPublicState() {
-  const fallback = createInitialState();
+  const fallback = mergeNotificationStateFromLocalStorage(createInitialState());
+  if (typeof localStorage === 'undefined') return fallback;
   try {
     localStorage.removeItem(LEGACY_STORAGE_KEY);
     const raw = localStorage.getItem(DEMO_STORAGE_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     if (!parsed.isDemoMode) return fallback;
-    return {
+    return mergeNotificationStateFromLocalStorage({
       ...fallback,
       ...parsed,
       authUserId: null,
@@ -352,7 +476,7 @@ function loadDemoOrPublicState() {
           ...(parsed.notificationPrefs?.mealTimes || {}),
         },
       },
-    };
+    });
   } catch {
     return fallback;
   }
@@ -414,8 +538,12 @@ class NutriStore {
   }
 
   persist() {
+    if (typeof localStorage === 'undefined') return;
     try {
       localStorage.setItem(THEME_STORAGE_KEY, this.state.theme);
+      writeStoredJSON(NOTIFICATIONS_STORAGE_KEY, this.state.notifications || []);
+      writeStoredJSON(NOTIF_PREFS_STORAGE_KEY, this.state.notificationPrefs || {});
+      writeStoredJSON(HYDRATION_STORAGE_KEY, this.state.hydration || buildDefaultHydration());
       if (this.state.isDemoMode) {
         localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(this.state));
       } else {
@@ -473,9 +601,17 @@ class NutriStore {
       try {
         const defaults = createInitialState(this.state.theme);
         const workspace = await fetchUserWorkspace(user, defaults);
+        const localBrowserPrefs = readLocalBrowserPrefs();
+        const storedHydration = readStoredHydration(getTodayISO());
         this._hydratedUserId = user.id;
         this.setState({
           ...workspace,
+          notificationPrefs: {
+            ...defaults.notificationPrefs,
+            ...workspace.notificationPrefs,
+            ...localBrowserPrefs,
+          },
+          hydration: storedHydration,
           selectedPlannerDay: getCurrentDayShortName(),
           authUserId: user.id,
           isAuthenticated: true,
@@ -961,6 +1097,15 @@ class NutriStore {
       notifications: [item, ...prev.notifications].slice(0, 20),
     }));
 
+    const prefs = this.state.notificationPrefs || {};
+    if (prefs.soundVibrationEnabled) {
+      playNotificationChime();
+      triggerNotificationVibration(200);
+    }
+    if (shouldSendBrowserPush(prefs, category, new Date())) {
+      triggerBrowserNotification({ title, message, category });
+    }
+
     if (this.isSupabaseUser()) {
       const userId = this.state.authUserId;
       insertNotification(userId, item)
@@ -984,6 +1129,23 @@ class NutriStore {
     }
   }
 
+  deleteNotification(id) {
+    if (!id) return;
+    this.setState((prev) => ({
+      notifications: prev.notifications.filter((n) => n.id !== id),
+    }));
+    if (this.isSupabaseUser() && !String(id).startsWith('notif-')) {
+      this.runDbSync(() => deleteNotificationRow(this.state.authUserId, id));
+    }
+  }
+
+  clearAllNotifications() {
+    this.setState({ notifications: [] });
+    if (this.isSupabaseUser()) {
+      this.runDbSync(() => clearNotificationRows(this.state.authUserId));
+    }
+  }
+
   updateNotificationPrefs(patch) {
     const nextPrefs = {
       ...this.state.notificationPrefs,
@@ -996,6 +1158,95 @@ class NutriStore {
     this.setState({ notificationPrefs: nextPrefs });
     if (this.isSupabaseUser()) {
       this.runDbSync(() => upsertNotificationPrefs(this.state.authUserId, nextPrefs));
+    }
+  }
+
+  addWaterGlass(delta = 1) {
+    const today = getTodayISO();
+    const currentHydration =
+      this.state.hydration?.dateISO === today
+        ? this.state.hydration
+        : buildDefaultHydration(today);
+    const goal = currentHydration.goalGlasses || DEFAULT_HYDRATION_GOAL;
+    const prevGlasses = Number(currentHydration.glasses) || 0;
+    const nextGlasses = clampWaterGlasses(prevGlasses + delta, 16);
+
+    this.setState({
+      hydration: {
+        ...currentHydration,
+        dateISO: today,
+        glasses: nextGlasses,
+        lastReminderAt: delta > 0 ? Date.now() : currentHydration.lastReminderAt,
+      },
+    });
+
+    if (delta > 0 && prevGlasses < goal && nextGlasses >= goal) {
+      this.addNotification({
+        title: 'Daily Hydration Goal Reached',
+        message: `Great job—you logged ${nextGlasses} of ${goal} glasses of water today.`,
+        category: 'Hydration',
+      });
+    }
+  }
+
+  resetWaterTracker() {
+    const today = getTodayISO();
+    this.setState((prev) => ({
+      hydration: {
+        dateISO: today,
+        glasses: 0,
+        goalGlasses: prev.hydration?.goalGlasses || DEFAULT_HYDRATION_GOAL,
+        lastReminderAt: Date.now(),
+      },
+    }));
+  }
+
+  checkScheduledReminders(now = new Date()) {
+    const prefs = this.state.notificationPrefs || {};
+    const today = getTodayISO();
+
+    // 1. Hydration interval reminder (outside Quiet Hours)
+    const hydration =
+      this.state.hydration?.dateISO === today
+        ? this.state.hydration
+        : buildDefaultHydration(today);
+
+    if (isHydrationReminderDue(hydration, prefs, now.getTime(), now)) {
+      const intervalHrs =
+        Number(prefs.hydrationReminderIntervalHours) || DEFAULT_HYDRATION_INTERVAL_HOURS;
+      this.setState({
+        hydration: {
+          ...hydration,
+          lastReminderAt: now.getTime(),
+        },
+      });
+      this.addNotification({
+        title: 'Hydration Reminder',
+        message: `Time for a glass of water (${hydration.glasses}/${hydration.goalGlasses || DEFAULT_HYDRATION_GOAL} glasses today · every ${intervalHrs}h).`,
+        category: 'Hydration',
+      });
+    }
+
+    // 2. Meal-time reminders (outside Quiet Hours)
+    if (prefs.mealReminders && !isWithinQuietHours(prefs, now)) {
+      const currentHHMM = formatHHMM(now);
+      const sentMapRes = readStoredJSON(MEAL_REMINDER_SENT_KEY);
+      const sentMap =
+        sentMapRes.exists && sentMapRes.value && sentMapRes.value.dateISO === today
+          ? sentMapRes.value
+          : { dateISO: today, slots: {} };
+
+      Object.entries(prefs.mealTimes || {}).forEach(([slot, timeVal]) => {
+        if (timeVal === currentHHMM && !sentMap.slots[slot]) {
+          sentMap.slots[slot] = true;
+          writeStoredJSON(MEAL_REMINDER_SENT_KEY, sentMap);
+          this.addNotification({
+            title: `${slot} Reminder · ${timeVal}`,
+            message: `Your scheduled ${slot.toLowerCase()} reminder is active—check your daily meal plan.`,
+            category: 'Meal Reminder',
+          });
+        }
+      });
     }
   }
 

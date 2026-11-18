@@ -180,3 +180,10 @@ window.addEventListener('keydown', (e) => {
 store.subscribe(renderApp);
 renderApp();
 initSupabaseSessionGuard();
+
+if (typeof window !== 'undefined') {
+  store.checkScheduledReminders();
+  window.setInterval(() => {
+    store.checkScheduledReminders();
+  }, 30000);
+}

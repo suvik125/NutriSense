@@ -362,6 +362,23 @@ export async function markAllNotificationsReadRows(userId) {
   assertNoError(error, 'Failed to mark notifications as read');
 }
 
+export async function deleteNotificationRow(userId, id) {
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', id);
+  assertNoError(error, 'Failed to delete notification');
+}
+
+export async function clearNotificationRows(userId) {
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', userId);
+  assertNoError(error, 'Failed to clear notifications');
+}
+
 export async function insertChatMessage(userId, msg) {
   const { data, error } = await supabase
     .from('ai_chat_messages')

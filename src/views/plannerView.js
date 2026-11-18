@@ -17,6 +17,10 @@ export function renderPlannerView(state) {
   const illnessMode = state.profile.illnessMode || 'none';
   const illnessInfo = ILLNESS_OPTIONS.find((i) => i.id === illnessMode) || ILLNESS_OPTIONS[0];
   const userAllergies = state.profile.allergies || [];
+  const hydration = state.hydration || { glasses: 0, goalGlasses: 8 };
+  const glasses = Number(hydration.glasses) || 0;
+  const goalGlasses = Number(hydration.goalGlasses) || 8;
+  const hydrationIntervalEnabled = Boolean(state.notificationPrefs?.hydrationIntervalEnabled);
 
   const dayTotals = MEAL_SLOTS.reduce(
     (acc, slot) => {
@@ -230,6 +234,28 @@ export function renderPlannerView(state) {
         }
       </section>
 
+      <!-- Compact Daily Hydration Tracker -->
+      <section class="rounded-2xl bg-white dark:bg-[#131518] border border-zinc-200 dark:border-[#24272F] px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-xs font-semibold text-zinc-900 dark:text-white">Daily Hydration</span>
+          <span data-planner-hydration-count class="font-mono-num text-xs font-bold text-[#658C0A] dark:text-[#B8F527]">${glasses}/${goalGlasses} glasses</span>
+          <div class="flex items-center gap-1" aria-hidden="true">
+            ${Array.from({ length: goalGlasses }, (_, idx) => `<span class="w-4 h-1.5 rounded-full ${idx < glasses ? 'bg-[#B8F527]' : 'bg-zinc-200 dark:bg-[#252830]'}"></span>`).join('')}
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            data-action="planner-add-water"
+            class="px-3 py-1.5 rounded-full bg-[#B8F527] hover:bg-[#A8E51B] text-zinc-950 text-xs font-bold transition-colors whitespace-nowrap"
+          >+1 Glass</button>
+          <label class="flex items-center gap-2 cursor-pointer text-xs text-zinc-600 dark:text-zinc-300">
+            <input type="checkbox" data-planner-hydration-interval ${hydrationIntervalEnabled ? 'checked' : ''} class="w-4 h-4 accent-[#B8F527]" />
+            <span>Remind every 2 hours</span>
+          </label>
+        </div>
+      </section>
+
       <!-- Day Selector & Day Summary -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div class="flex items-center gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Days of the week">
@@ -282,6 +308,21 @@ export function bindPlannerViewEvents(root) {
 
   root.querySelector('[data-action="open-meal-reminders"]')?.addEventListener('click', () => {
     store.setUI({ notificationsOpen: true });
+  });
+
+  root.querySelector('[data-action="planner-add-water"]')?.addEventListener('click', () => {
+    store.addWaterGlass(1);
+    const { glasses, goalGlasses } = store.getState().hydration || { glasses: 0, goalGlasses: 8 };
+    showToast(`Logged water intake (${glasses}/${goalGlasses} glasses)`);
+  });
+
+  root.querySelector('[data-planner-hydration-interval]')?.addEventListener('change', (e) => {
+    store.updateNotificationPrefs({ hydrationIntervalEnabled: e.currentTarget.checked });
+    showToast(
+      e.currentTarget.checked
+        ? '2-hour hydration reminders enabled'
+        : '2-hour hydration reminders paused'
+    );
   });
 
   root.querySelectorAll('[data-swap-meal]').forEach((btn) =>

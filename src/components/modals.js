@@ -3,6 +3,13 @@ import { store } from '../state/store.js';
 import { ASSISTANT_QUICK_REPLIES } from '../data/catalog.js';
 import { showToast } from './toast.js';
 import { supabase } from '../supabaseClient.js';
+import { isWithinQuietHours } from '../utils/notifications.js';
+import {
+  getBrowserNotificationPermission,
+  playNotificationChime,
+  requestBrowserNotificationPermission,
+  triggerNotificationVibration,
+} from '../utils/notificationEffects.js';
 
 export function renderModalsAndAssistant(state, ui) {
   return `
@@ -188,28 +195,59 @@ function renderAuthModal(state, ui) {
 
 function renderNotificationsDrawer(state, ui) {
   if (!ui.notificationsOpen) return '';
-  const prefs = state.notificationPrefs;
+  const prefs = state.notificationPrefs || {};
+  const hydration = state.hydration || { glasses: 0, goalGlasses: 8 };
+  const glasses = Number(hydration.glasses) || 0;
+  const goalGlasses = Number(hydration.goalGlasses) || 8;
+  const pushPerm = getBrowserNotificationPermission();
+  const quietNow = isWithinQuietHours(prefs);
+
+  const pushHint =
+    pushPerm === 'granted'
+      ? 'Permission granted'
+      : pushPerm === 'denied'
+        ? 'Blocked in browser settings'
+        : pushPerm === 'unsupported'
+          ? 'Not supported in this browser'
+          : 'Prompts for browser permission';
 
   const listHtml = state.notifications.length
     ? state.notifications
         .map(
           (n) => `
-          <div class="p-3.5 rounded-2xl border ${
+          <div data-notif-card="${escapeHtml(n.id)}" class="p-3.5 rounded-2xl border ${
             n.read
               ? 'border-zinc-200 dark:border-[#24272F] bg-zinc-50 dark:bg-[#17191E]'
               : 'border-[#B8F527]/40 bg-[#B8F527]/5 dark:bg-[#1B2014]'
           }">
             <div class="flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-              <span>${n.category} · ${n.timeLabel}</span>
-              ${!n.read ? '<span class="text-[11px] font-semibold text-[#658C0A] dark:text-[#B8F527]">New</span>' : ''}
+              <span>${escapeHtml(n.category)} · ${escapeHtml(n.timeLabel)}</span>
+              <div class="flex items-center gap-1.5 shrink-0">
+                ${!n.read ? '<span class="text-[11px] font-semibold text-[#658C0A] dark:text-[#B8F527]">New</span>' : ''}
+                <button
+                  type="button"
+                  data-action="delete-notification"
+                  data-notif-id="${escapeHtml(n.id)}"
+                  aria-label="Delete notification"
+                  title="Remove notification"
+                  class="w-6 h-6 rounded-lg flex items-center justify-center text-zinc-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-zinc-200/70 dark:hover:bg-[#24272F] transition-colors"
+                >${icon('x', 'w-3.5 h-3.5')}</button>
+              </div>
             </div>
-            <p class="mt-1 text-sm font-semibold text-zinc-900 dark:text-white">${n.title}</p>
-            <p class="mt-0.5 text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">${n.message}</p>
+            <p class="mt-1 text-sm font-semibold text-zinc-900 dark:text-white">${escapeHtml(n.title)}</p>
+            <p class="mt-0.5 text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">${escapeHtml(n.message)}</p>
           </div>
         `
         )
         .join('')
     : '<p class="text-sm text-zinc-500 py-6 text-center">No notifications yet.</p>';
+
+  const waterSegments = Array.from({ length: goalGlasses }, (_, idx) => {
+    const filled = idx < glasses;
+    return `<span class="h-1.5 rounded-full transition-colors ${
+      filled ? 'bg-[#B8F527]' : 'bg-zinc-200 dark:bg-[#262A33]'
+    }"></span>`;
+  }).join('');
 
   return `
     <div
@@ -225,12 +263,18 @@ function renderNotificationsDrawer(state, ui) {
             <h2 id="notif-drawer-title" class="font-display text-lg font-bold text-zinc-950 dark:text-white">Notifications &amp; Reminders</h2>
             <p class="text-xs text-zinc-500 dark:text-zinc-400">Meal schedules, macro insights &amp; quiet hours</p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               data-action="mark-all-read"
-              class="text-xs font-semibold text-[#658C0A] dark:text-[#B8F527] hover:underline px-2 py-1"
+              class="text-xs font-semibold text-[#658C0A] dark:text-[#B8F527] hover:underline px-1.5 py-1 whitespace-nowrap"
             >Mark all read</button>
+            <button
+              type="button"
+              data-action="clear-all-notifications"
+              ${state.notifications.length === 0 ? 'disabled' : ''}
+              class="text-xs font-semibold text-zinc-500 dark:text-zinc-400 hover:text-rose-500 dark:hover:text-rose-400 disabled:opacity-40 disabled:pointer-events-none px-1.5 py-1 whitespace-nowrap transition-colors"
+            >Clear all</button>
             <button
               type="button"
               data-action="close-notifications"
@@ -242,7 +286,10 @@ function renderNotificationsDrawer(state, ui) {
 
         <div class="flex-1 overflow-y-auto p-5 space-y-6">
           <section class="space-y-2.5">
-            <h3 class="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Recent Feed</h3>
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Recent Feed</h3>
+              <span class="text-[11px] font-mono-num text-zinc-400">${state.notifications.length} item${state.notifications.length === 1 ? '' : 's'}</span>
+            </div>
             <div class="space-y-2.5">${listHtml}</div>
           </section>
 
@@ -261,11 +308,56 @@ function renderNotificationsDrawer(state, ui) {
               <span class="text-sm text-zinc-800 dark:text-zinc-200">Weekly Nutrition Summary</span>
               <input type="checkbox" data-pref="weeklySummary" ${prefs.weeklySummary ? 'checked' : ''} class="w-4 h-4 accent-[#B8F527]" />
             </label>
+            <label class="flex items-center justify-between gap-3 cursor-pointer">
+              <div>
+                <span class="block text-sm text-zinc-800 dark:text-zinc-200">Browser Push Alerts</span>
+                <span class="block text-[11px] text-zinc-500 dark:text-zinc-400">${pushHint}</span>
+              </div>
+              <input type="checkbox" data-pref-push="browserPushEnabled" ${prefs.browserPushEnabled ? 'checked' : ''} class="w-4 h-4 accent-[#B8F527]" />
+            </label>
+            <label class="flex items-center justify-between gap-3 cursor-pointer">
+              <div>
+                <span class="block text-sm text-zinc-800 dark:text-zinc-200">Notification Sound &amp; Vibration</span>
+                <span class="block text-[11px] text-zinc-500 dark:text-zinc-400">Subtle chime &amp; 200ms haptic pulse</span>
+              </div>
+              <input type="checkbox" data-pref="soundVibrationEnabled" ${prefs.soundVibrationEnabled ? 'checked' : ''} class="w-4 h-4 accent-[#B8F527]" />
+            </label>
+
+            <div class="p-3.5 rounded-2xl bg-zinc-50 dark:bg-[#17191E] border border-zinc-200 dark:border-[#24272F] space-y-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <p class="text-xs font-semibold text-zinc-900 dark:text-white">Daily Hydration Tracker</p>
+                  <p class="text-[11px] text-zinc-500 dark:text-zinc-400">Stay hydrated outside quiet hours</p>
+                </div>
+                <span data-hydration-count class="font-mono-num text-xs font-bold text-[#658C0A] dark:text-[#B8F527]">${glasses}/${goalGlasses} glasses</span>
+              </div>
+              <div class="grid grid-cols-8 gap-1.5" aria-hidden="true">${waterSegments}</div>
+              <div class="flex items-center justify-between gap-2 pt-0.5">
+                <div class="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    data-action="add-water-glass"
+                    class="px-3 py-1.5 rounded-xl bg-[#B8F527] hover:bg-[#A8E51B] text-zinc-950 text-xs font-bold transition-colors"
+                  >+1 Glass</button>
+                  <button
+                    type="button"
+                    data-action="remove-water-glass"
+                    ${glasses <= 0 ? 'disabled' : ''}
+                    aria-label="Remove one glass"
+                    class="px-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-[#2B2E36] text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:border-zinc-400 disabled:opacity-40 disabled:pointer-events-none"
+                  >-1</button>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <span class="text-xs text-zinc-700 dark:text-zinc-300">Remind every 2 hours</span>
+                  <input type="checkbox" data-pref="hydrationIntervalEnabled" ${prefs.hydrationIntervalEnabled ? 'checked' : ''} class="w-4 h-4 accent-[#B8F527]" />
+                </label>
+              </div>
+            </div>
 
             <div class="pt-2 space-y-2">
               <p class="text-xs font-medium text-zinc-600 dark:text-zinc-400">Reminder Schedule</p>
               <div class="grid grid-cols-2 gap-2.5">
-                ${Object.entries(prefs.mealTimes)
+                ${Object.entries(prefs.mealTimes || {})
                   .map(
                     ([slot, val]) => `
                   <label class="text-xs text-zinc-500 dark:text-zinc-400 flex flex-col gap-1">
@@ -280,7 +372,14 @@ function renderNotificationsDrawer(state, ui) {
 
             <div class="pt-2 space-y-2.5">
               <label class="flex items-center justify-between gap-3 cursor-pointer">
-                <span class="text-sm text-zinc-800 dark:text-zinc-200">Quiet Hours</span>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm text-zinc-800 dark:text-zinc-200">Quiet Hours</span>
+                  ${
+                    quietNow
+                      ? '<span class="text-[10px] font-semibold text-amber-500 dark:text-amber-300">Active now</span>'
+                      : ''
+                  }
+                </div>
                 <input type="checkbox" data-pref="quietHoursEnabled" ${prefs.quietHoursEnabled ? 'checked' : ''} class="w-4 h-4 accent-[#B8F527]" />
               </label>
               <div class="grid grid-cols-2 gap-2.5 ${prefs.quietHoursEnabled ? '' : 'opacity-45 pointer-events-none'}">
@@ -572,9 +671,55 @@ export function bindModalsAndAssistantEvents(root) {
     store.markAllNotificationsRead();
     showToast('All notifications marked as read');
   });
+  root.querySelector('[data-action="clear-all-notifications"]')?.addEventListener('click', () => {
+    store.clearAllNotifications();
+    showToast('All notifications cleared');
+  });
+  root.querySelectorAll('[data-action="delete-notification"]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-notif-id');
+      store.deleteNotification(id);
+      showToast('Notification removed');
+    })
+  );
+  root.querySelector('[data-action="add-water-glass"]')?.addEventListener('click', () => {
+    store.addWaterGlass(1);
+    const { glasses, goalGlasses } = store.getState().hydration || { glasses: 0, goalGlasses: 8 };
+    showToast(`Logged water intake (${glasses}/${goalGlasses} glasses)`);
+  });
+  root.querySelector('[data-action="remove-water-glass"]')?.addEventListener('click', () => {
+    store.addWaterGlass(-1);
+  });
+  root.querySelector('[data-pref-push]')?.addEventListener('change', async (e) => {
+    const input = e.currentTarget;
+    if (!input.checked) {
+      store.updateNotificationPrefs({ browserPushEnabled: false });
+      showToast('Browser push alerts disabled');
+      return;
+    }
+    const perm = await requestBrowserNotificationPermission();
+    if (perm === 'granted') {
+      store.updateNotificationPrefs({ browserPushEnabled: true });
+      showToast('Browser push alerts enabled');
+    } else {
+      input.checked = false;
+      store.updateNotificationPrefs({ browserPushEnabled: false });
+      showToast(
+        perm === 'unsupported'
+          ? 'Browser notifications are not supported here'
+          : 'Browser notification permission was denied',
+        'error'
+      );
+    }
+  });
   root.querySelectorAll('[data-pref]').forEach((input) =>
     input.addEventListener('change', () => {
-      store.updateNotificationPrefs({ [input.getAttribute('data-pref')]: input.checked });
+      const prefKey = input.getAttribute('data-pref');
+      store.updateNotificationPrefs({ [prefKey]: input.checked });
+      if (prefKey === 'soundVibrationEnabled' && input.checked) {
+        playNotificationChime();
+        triggerNotificationVibration(200);
+      }
       showToast('Notification preference updated');
     })
   );
