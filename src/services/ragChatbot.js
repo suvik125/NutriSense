@@ -1,7 +1,6 @@
 // src/services/ragChatbot.js
 import {
   ANALYZER_PRESETS,
-  HEALTH_CONDITIONS,
   ILLNESS_OPTIONS,
   MEAL_CATALOG,
   NUTRI_NOTES,
@@ -73,7 +72,7 @@ const DAY_ALIASES = {
 const SLOT_ALIASES = {
   breakfast: 'breakfast', সকাল: 'breakfast', নাস্তা: 'breakfast', ব্রেকফাস্ট: 'breakfast', morning: 'breakfast',
   lunch: 'lunch', দুপুর: 'lunch', লাঞ্চ: 'lunch', noon: 'lunch',
-  snack: 'snack', বিকেল: 'snack', স্ন্যাকস: 'snack', নাস্তা_বিকেল: 'snack', snacking: 'snack',
+  snack: 'snack', বিকেল: 'snack', স্ন্যাকস: 'snack', snacking: 'snack',
   dinner: 'dinner', রাত: 'dinner', ডিনার: 'dinner', night: 'dinner',
 };
 
@@ -275,7 +274,10 @@ export function computeProgressReport(state, periodDays = 1) {
 
     const mealLines = todayLogs.length
       ? todayLogs
-          .map((m) => `• **${m.mealType}**: ${m.name} — ${m.calories} kcal (${m.proteinG}g P, ${m.carbsG}g C, ${m.fatG}g F)`)
+          .map(
+            (m) =>
+              `• **${m.mealType}**: ${m.name} — ${m.calories} kcal (${m.proteinG}g P, ${m.carbsG}g C, ${m.fatG}g F)`
+          )
           .join('\n')
       : '• আজ এখনো কোনো খাবার লগ করা হয়নি।';
 
@@ -285,7 +287,9 @@ export function computeProgressReport(state, periodDays = 1) {
       text:
         `📊 **Today's Daily Nutrition Report (${todayISO})**\n` +
         `• **Calories**: ${formatNumber(stats.calories)} / ${formatNumber(targetKcal)} kcal (${pct}%)${
-          overKcal > 0 ? ` · ⚠️ ${formatNumber(overKcal)} kcal over target` : ` · **${formatNumber(remainingKcal)} kcal remaining**`
+          overKcal > 0
+            ? ` · ⚠️ ${formatNumber(overKcal)} kcal over target`
+            : ` · **${formatNumber(remainingKcal)} kcal remaining**`
         }\n` +
         `• **Macros**: Protein **${stats.proteinG}g**/${targetP}g · Carbs **${stats.carbsG}g**/${targetC}g · Fat **${stats.fatG}g**/${targetF}g · Fiber **${stats.fiberG}g**/${targetFiber}g\n` +
         `• **Hydration**: 💧 ${hydration.glasses || 0}/${hydration.goalGlasses || 8} glasses of water\n` +
@@ -295,7 +299,6 @@ export function computeProgressReport(state, periodDays = 1) {
 
   // 7-Day (Weekly) or 30-Day (Monthly) Report
   const daySummaries = [];
-  let loggedDaysCount = 0;
 
   for (let i = periodDays - 1; i >= 0; i--) {
     const iso = getOffsetDateISO(i);
@@ -306,9 +309,7 @@ export function computeProgressReport(state, periodDays = 1) {
     let fatG = actual.fatG;
     let fiberG = actual.fiberG;
 
-    if (actual.count > 0) {
-      loggedDaysCount++;
-    } else if (i > 0) {
+    if (actual.count === 0 && i > 0) {
       // Match My Foods deterministic baseline for historical days
       const wave = ((i * 7 + 3) % 11) - 5;
       calories = Math.max(1350, Math.round(targetKcal + wave * 42));
@@ -336,7 +337,10 @@ export function computeProgressReport(state, periodDays = 1) {
   const highestDay = sortedByKcal[0];
   const lowestDay = sortedByKcal[sortedByKcal.length - 1];
 
-  const title = periodDays === 7 ? '📈 **Weekly (7-Day) Nutrition Report**' : '📅 **Monthly (30-Day) Nutrition Report**';
+  const title =
+    periodDays === 7
+      ? '📈 **Weekly (7-Day) Nutrition Report**'
+      : '📅 **Monthly (30-Day) Nutrition Report**';
 
   return {
     type: periodDays === 7 ? 'weekly' : 'monthly',
@@ -357,7 +361,325 @@ export function computeProgressReport(state, periodDays = 1) {
 }
 
 /**
- * 4. Evaluate Food Safety against User's Bangladesh Health Profile (Diabetes, Hypertension, PCOS, Anemia, Allergies)
+ * 4. Client-Side Print-Ready A4 PDF Nutrition Report Exporter (Daily / 7-Day / 30-Day)
+ * Zero Vercel Serverless Functions required.
+ */
+export function exportNutritionReportPDF(state, periodDays = 7) {
+  if (typeof window === 'undefined') return false;
+
+  const todayISO = getTodayISO();
+  const profile = state.profile || {};
+  const bio = profile.biometrics || {};
+  const targets = state.nutritionTargets || {};
+  const hydration = state.hydration || { glasses: 0, goalGlasses: 8 };
+  const todayStats = summarizeDailyLogs(state.foodLogs, todayISO);
+
+  const periodTitle =
+    periodDays === 1
+      ? `Daily Nutrition Report (${todayISO})`
+      : periodDays === 7
+      ? `Weekly (7-Day) Nutrition Report`
+      : `Monthly (30-Day) Nutrition Report`;
+
+  const rows = [];
+  for (let i = periodDays - 1; i >= 0; i--) {
+    const iso = getOffsetDateISO(i);
+    const actual = summarizeDailyLogs(state.foodLogs, iso);
+    let calories = actual.calories;
+    let proteinG = actual.proteinG;
+    let carbsG = actual.carbsG;
+    let fatG = actual.fatG;
+    let fiberG = actual.fiberG;
+    const sourceLabel = actual.count > 0 ? `${actual.count} logged meal(s)` : 'Baseline estimate';
+
+    if (actual.count === 0 && i > 0 && periodDays > 1) {
+      const wave = ((i * 7 + 3) % 11) - 5;
+      calories = Math.max(1350, Math.round((targets.targetCalories || 2200) + wave * 42));
+      proteinG = Math.round((calories * 0.3) / 4);
+      carbsG = Math.round((calories * 0.42) / 4);
+      fatG = Math.round((calories * 0.28) / 9);
+      fiberG = Math.round((calories / 1000) * 14);
+    }
+
+    const hitTarget =
+      calories >= (targets.targetCalories || 2200) * 0.85 &&
+      calories <= (targets.targetCalories || 2200) * 1.15;
+
+    rows.push({
+      iso,
+      calories,
+      proteinG,
+      carbsG,
+      fatG,
+      fiberG,
+      sourceLabel,
+      status:
+        actual.count === 0 && periodDays === 1
+          ? 'No Logs Yet'
+          : hitTarget
+          ? 'On Target'
+          : 'Variance',
+    });
+  }
+
+  const avgKcal = Math.round(rows.reduce((s, r) => s + r.calories, 0) / Math.max(1, rows.length));
+  const avgP = Math.round(rows.reduce((s, r) => s + r.proteinG, 0) / Math.max(1, rows.length));
+  const avgC = Math.round(rows.reduce((s, r) => s + r.carbsG, 0) / Math.max(1, rows.length));
+  const avgF = Math.round(rows.reduce((s, r) => s + r.fatG, 0) / Math.max(1, rows.length));
+  const onTargetCount = rows.filter((r) => r.status === 'On Target').length;
+  const adherencePct = Math.round((onTargetCount / Math.max(1, rows.length)) * 100);
+
+  const recentLogs = (state.foodLogs || []).slice(0, 12);
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NutriSense - ${periodTitle}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #18181b;
+      background: #ffffff;
+      padding: 32px;
+      line-height: 1.5;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 3px solid #84cc16;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    .brand { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+    .brand span { color: #65a30d; }
+    .subtitle { font-size: 12px; color: #52525b; margin-top: 2px; }
+    .meta { text-align: right; font-size: 12px; color: #3f3f46; }
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #3f3f46;
+      margin: 20px 0 10px;
+    }
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .card {
+      border: 1px solid #e4e4e7;
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: #fafafa;
+    }
+    .card-label { font-size: 11px; color: #71717a; font-weight: 600; }
+    .card-value { font-size: 20px; font-weight: 800; color: #18181b; margin-top: 4px; }
+    .card-sub { font-size: 11px; color: #65a30d; font-weight: 600; margin-top: 2px; }
+    .profile-bar {
+      border: 1px solid #d9f99d;
+      background: #f7fee7;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 12px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-bottom: 20px;
+    }
+    th, td {
+      border: 1px solid #e4e4e7;
+      padding: 8px 10px;
+      text-align: left;
+    }
+    th {
+      background: #f4f4f5;
+      font-weight: 700;
+      color: #27272a;
+    }
+    tr:nth-child(even) { background: #fafafa; }
+    .badge-ok {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #ecfccb;
+      color: #4d7c0f;
+      font-weight: 700;
+      font-size: 10px;
+    }
+    .badge-warn {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #fef3c7;
+      color: #b45309;
+      font-weight: 700;
+      font-size: 10px;
+    }
+    .footer {
+      margin-top: 28px;
+      padding-top: 12px;
+      border-top: 1px solid #e4e4e7;
+      font-size: 11px;
+      color: #71717a;
+      display: flex;
+      justify-content: space-between;
+    }
+    @media print {
+      body { padding: 12px; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">Nutri<span>Sense</span></div>
+      <div class="subtitle">Personalized Nutrition &amp; Adaptive Diet Platform · ${periodTitle}</div>
+    </div>
+    <div class="meta">
+      <div><strong>Member:</strong> ${profile.name || 'Member'} (${profile.email || ''})</div>
+      <div><strong>Generated:</strong> ${new Date().toLocaleString('en-US')}</div>
+    </div>
+  </div>
+
+  <div class="profile-bar">
+    <div><strong>Age/Sex:</strong> ${bio.age || 29}y / ${bio.gender || 'male'}</div>
+    <div><strong>Height/Weight:</strong> ${bio.heightCm || 178} cm / ${bio.weightKg || 76} kg</div>
+    <div><strong>BMI:</strong> ${Number(targets.bmi || 24).toFixed(1)} (${targets.bmiCategory || 'Healthy Weight'})</div>
+    <div><strong>Goal:</strong> ${GOAL_ADJUSTMENTS[bio.goal]?.label || 'Body Recomp'}</div>
+    <div><strong>Conditions:</strong> ${(profile.healthConditions || []).join(', ') || 'None'}</div>
+    <div><strong>Allergies:</strong> ${(profile.allergies || []).join(', ') || 'None'}</div>
+    <div><strong>Wellness Mode:</strong> ${profile.illnessMode || 'none'}</div>
+  </div>
+
+  <div class="section-title">Executive Summary (${periodDays === 1 ? 'Today' : `${periodDays}-Day Horizon`})</div>
+  <div class="grid-4">
+    <div class="card">
+      <div class="card-label">${periodDays === 1 ? "Today's Calories" : 'Average Daily Calories'}</div>
+      <div class="card-value">${formatNumber(periodDays === 1 ? todayStats.calories : avgKcal)} kcal</div>
+      <div class="card-sub">Target: ${formatNumber(targets.targetCalories || 2200)} kcal (BMR ${targets.bmr} · TDEE ${targets.tdee})</div>
+    </div>
+    <div class="card">
+      <div class="card-label">${periodDays === 1 ? "Today's Protein" : 'Average Protein'}</div>
+      <div class="card-value">${periodDays === 1 ? todayStats.proteinG : avgP}g / ${targets.proteinG || 150}g</div>
+      <div class="card-sub">Carbs: ${periodDays === 1 ? todayStats.carbsG : avgC}g · Fat: ${periodDays === 1 ? todayStats.fatG : avgF}g</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Target Adherence</div>
+      <div class="card-value">${adherencePct}%</div>
+      <div class="card-sub">${onTargetCount} of ${rows.length} day(s) within ±15% goal</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Hydration &amp; Micros</div>
+      <div class="card-value">${hydration.glasses || 0}/${hydration.goalGlasses || 8} Glasses</div>
+      <div class="card-sub">Na Cap: ${targets.sodiumMg || 2300}mg · Fe: ${targets.ironMg || 8}mg</div>
+    </div>
+  </div>
+
+  <div class="section-title">Day-by-Day Calorie &amp; Macro Breakdown</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Calories (kcal)</th>
+        <th>Protein (g)</th>
+        <th>Carbs (g)</th>
+        <th>Fat (g)</th>
+        <th>Fiber (g)</th>
+        <th>Source</th>
+        <th>Adherence</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows
+        .map(
+          (r) => `
+        <tr>
+          <td><strong>${r.iso}</strong></td>
+          <td>${formatNumber(r.calories)} / ${formatNumber(targets.targetCalories || 2200)}</td>
+          <td>${r.proteinG}g</td>
+          <td>${r.carbsG}g</td>
+          <td>${r.fatG}g</td>
+          <td>${r.fiberG}g</td>
+          <td>${r.sourceLabel}</td>
+          <td><span class="${r.status === 'On Target' ? 'badge-ok' : 'badge-warn'}">${r.status}</span></td>
+        </tr>
+      `
+        )
+        .join('')}
+    </tbody>
+  </table>
+
+  <div class="section-title">Recent Logged Meals</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date &amp; Time</th>
+        <th>Meal Slot</th>
+        <th>Dish Name</th>
+        <th>Portion</th>
+        <th>Calories</th>
+        <th>Macros (P / C / F)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${
+        recentLogs.length
+          ? recentLogs
+              .map(
+                (l) => `
+          <tr>
+            <td>${l.dateISO} · ${l.timeLabel || ''}</td>
+            <td>${l.mealType}</td>
+            <td><strong>${l.name}</strong></td>
+            <td>${l.portion || '1 serving'}</td>
+            <td>${l.calories} kcal</td>
+            <td>${l.proteinG}g P · ${l.carbsG}g C · ${l.fatG}g F</td>
+          </tr>
+        `
+              )
+              .join('')
+          : '<tr><td colspan="6">No meals logged yet.</td></tr>'
+      }
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>NutriSense Personalized Nutrition Companion · Bangladesh Health Edition</span>
+    <span>Informational estimates · Not clinical medical advice</span>
+  </div>
+
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 250);
+    };
+  </script>
+</body>
+</html>`;
+
+  const printWin = window.open('', '_blank', 'width=960,height=800');
+  if (!printWin) return false;
+  printWin.document.open();
+  printWin.document.write(html);
+  printWin.document.close();
+  return true;
+}
+
+/**
+ * 5. Evaluate Food Safety against User's Bangladesh Health Profile (Diabetes, Hypertension, PCOS, Anemia, Allergies)
  */
 function buildHealthSuitabilityNote(food, state) {
   const conditions = state.profile?.healthConditions || [];
@@ -366,22 +688,32 @@ function buildHealthSuitabilityNote(food, state) {
 
   const conflicts = findAllergyConflicts(food.allergens, allergies);
   if (conflicts.length > 0) {
-    notes.push(`⚠️ **Allergy Alert**: এতে **${conflicts.join(', ')}** রয়েছে যা আপনার অ্যালার্জি লিস্টে আছে!`);
+    notes.push(
+      `⚠️ **Allergy Alert**: এতে **${conflicts.join(', ')}** রয়েছে যা আপনার অ্যালার্জি লিস্টে আছে!`
+    );
   } else {
     notes.push(`✅ **Allergy Safe**: আপনার প্রোফাইলের কোনো অ্যালার্জেন এতে নেই।`);
   }
 
   if (conditions.includes('Diabetes / Blood Sugar') || conditions.includes('PCOS')) {
     if (food.carbsG >= 55) {
-      notes.push(`🩸 **Diabetes/PCOS Note**: এতে কার্বোহাইড্রেট বেশি (${food.carbsG}g)। ব্লাড সুগার নিয়ন্ত্রণে রাখতে পোরশন ০.৫x–০.৭৫x করুন এবং সাথে সালাদ বা শাক যোগ করুন।`);
+      notes.push(
+        `🩸 **Diabetes/PCOS Note**: এতে কার্বোহাইড্রেট বেশি (${food.carbsG}g)। ব্লাড সুগার নিয়ন্ত্রণে রাখতে পোরশন ০.৫x–০.৭৫x করুন এবং সাথে সালাদ বা শাক যোগ করুন।`
+      );
     } else {
-      notes.push(`🩸 **Diabetes/PCOS Friendly**: কার্বোহাইড্রেট পরিমিত (${food.carbsG}g) এবং প্রোটিন/ফাইবার ব্যালেন্সড।`);
+      notes.push(
+        `🩸 **Diabetes/PCOS Friendly**: কার্বোহাইড্রেট পরিমিত (${food.carbsG}g) এবং প্রোটিন/ফাইবার ব্যালেন্সড।`
+      );
     }
   }
 
   if (conditions.includes('Hypertension')) {
     if ((food.sodiumMg || 0) >= 600) {
-      notes.push(`🫀 **Hypertension Note**: এতে সোডিয়াম তুলনামূলক বেশি (~${food.sodiumMg}mg)। আপনার ডেইলি লিমিট ${state.nutritionTargets?.sodiumMg || 1500}mg, তাই অতিরিক্ত লবণ এড়িয়ে চলুন।`);
+      notes.push(
+        `🫀 **Hypertension Note**: এতে সোডিয়াম তুলনামূলক বেশি (~${food.sodiumMg}mg)। আপনার ডেইলি লিমিট ${
+          state.nutritionTargets?.sodiumMg || 1500
+        }mg, তাই অতিরিক্ত লবণ এড়িয়ে চলুন।`
+      );
     } else {
       notes.push(`🫀 **Blood Pressure Friendly**: সোডিয়াম মাত্রা সহনীয় (~${food.sodiumMg || 350}mg)।`);
     }
@@ -394,9 +726,6 @@ function buildHealthSuitabilityNote(food, state) {
   return notes.join('\n');
 }
 
-/**
- * 5. Detect & Execute Agentic Intent (Swap Meal, Regenerate Day, Log Food, Set Illness Mode, Add Water, Reports)
- */
 function parseDayFromQuery(q, fallbackDay) {
   const words = q.replace(/[?.,!]/g, ' ').split(/\s+/);
   for (const w of words) {
@@ -412,13 +741,25 @@ function parseSlotFromQuery(q) {
   return null;
 }
 
+/**
+ * 6. Main RAG + Agentic Action Pipeline for Every Chat Turn
+ */
 export async function processRagChatTurn(userMessage, store) {
   const state = store.getState();
   const q = String(userMessage || '').toLowerCase().trim();
   const activeDay = state.selectedPlannerDay || getCurrentDayShortName();
 
-  // --- INTENT A: DAILY / WEEKLY / MONTHLY REPORTS ---
+  // --- INTENT A: DAILY / WEEKLY / MONTHLY REPORTS (+ PDF EXPORT) ---
+  const wantsPdf =
+    q.includes('pdf') ||
+    q.includes('download') ||
+    q.includes('print') ||
+    q.includes('export') ||
+    q.includes('পিডিএফ') ||
+    q.includes('ডাউনলোড');
+
   if (
+    wantsPdf ||
     q.includes('report') ||
     q.includes('summary') ||
     q.includes('analytics') ||
@@ -428,29 +769,34 @@ export async function processRagChatTurn(userMessage, store) {
     q.includes('আজকে কত') ||
     q.includes('remaining')
   ) {
+    let periodDays = 1;
     if (q.includes('month') || q.includes('30') || q.includes('মাস') || q.includes('৩০')) {
+      periodDays = 30;
       store.setChartRangeDays(30);
-      const rep = computeProgressReport(store.getState(), 30);
-      return {
-        text: rep.text,
-        sources: ['30-Day Food Logs', 'Mifflin-St Jeor Targets'],
-        actionBadge: 'Synced 30-Day Analytics',
-      };
-    }
-    if (q.includes('week') || q.includes('7') || q.includes('সপ্তাহ') || q.includes('৭')) {
+    } else if (q.includes('week') || q.includes('7') || q.includes('সপ্তাহ') || q.includes('৭')) {
+      periodDays = 7;
       store.setChartRangeDays(7);
-      const rep = computeProgressReport(store.getState(), 7);
-      return {
-        text: rep.text,
-        sources: ['7-Day Food Logs', 'Macro Adherence Engine'],
-        actionBadge: 'Synced 7-Day Analytics',
-      };
     }
-    const rep = computeProgressReport(state, 1);
+
+    const rep = computeProgressReport(store.getState(), periodDays);
+    if (wantsPdf) {
+      exportNutritionReportPDF(store.getState(), periodDays);
+    }
+
     return {
-      text: rep.text,
-      sources: ['Today Food Logs', 'Hydration Tracker'],
-      actionBadge: 'Daily Report Generated',
+      text:
+        rep.text +
+        (wantsPdf
+          ? `\n\n📄 **PDF Report উইন্ডো ওপেন করা হয়েছে!** (পপ-আপ ব্লক থাকলে নিচের বাটনে ক্লিক করুন)।`
+          : `\n\n💡 *নিচের বাটনে ক্লিক করে এই রিপোর্টটি **PDF** হিসেবে সেভ করতে পারেন।*`),
+      sources: [
+        periodDays === 1 ? 'Today Food Logs' : `${periodDays}-Day Food Logs`,
+        'Mifflin-St Jeor Targets',
+      ],
+      actionBadge: wantsPdf
+        ? `Exported ${periodDays === 1 ? 'Daily' : `${periodDays}-Day`} PDF`
+        : `${periodDays === 1 ? 'Daily' : `${periodDays}-Day`} Report Ready`,
+      pdfReportPeriod: periodDays,
     };
   }
 
@@ -490,7 +836,6 @@ export async function processRagChatTurn(userMessage, store) {
       };
     }
 
-    // Regenerate whole day if no specific slot was mentioned
     await store.regenerateDay(targetDay);
     const updatedDayPlan = store.getState().mealPlan.days[targetDay];
     return {
@@ -535,13 +880,18 @@ export async function processRagChatTurn(userMessage, store) {
         source: 'AI Assistant',
       });
       const todayStats = summarizeDailyLogs(store.getState().foodLogs, getTodayISO());
-      const rem = Math.max(0, store.getState().nutritionTargets.targetCalories - todayStats.calories);
+      const rem = Math.max(
+        0,
+        store.getState().nutritionTargets.targetCalories - todayStats.calories
+      );
       return {
         text:
           `✅ **Logged to My Foods (${mealType})**\n` +
           `• **Dish**: **${saved?.name || food.name}** (${food.portion})\n` +
           `• **Nutrition Added**: +**${food.calories} kcal** (${food.proteinG}g P · ${food.carbsG}g C · ${food.fatG}g F · ${food.fiberG}g Fiber)\n` +
-          `• **Today's Total**: ${formatNumber(todayStats.calories)} / ${formatNumber(store.getState().nutritionTargets.targetCalories)} kcal (**${formatNumber(rem)} kcal remaining**)`,
+          `• **Today's Total**: ${formatNumber(todayStats.calories)} / ${formatNumber(
+            store.getState().nutritionTargets.targetCalories
+          )} kcal (**${formatNumber(rem)} kcal remaining**)`,
         sources: [food.source, 'Food Log Database'],
         actionBadge: `Logged +${food.calories} kcal`,
       };
@@ -551,7 +901,12 @@ export async function processRagChatTurn(userMessage, store) {
   // --- INTENT D: HYDRATION / WATER LOGGING ---
   if (
     (q.includes('water') || q.includes('glass') || q.includes('hydrate') || q.includes('পানি')) &&
-    (q.includes('add') || q.includes('log') || q.includes('drank') || q.includes('+1') || q.includes('খেয়েছি') || q.includes('যোগ'))
+    (q.includes('add') ||
+      q.includes('log') ||
+      q.includes('drank') ||
+      q.includes('+1') ||
+      q.includes('খেয়েছি') ||
+      q.includes('যোগ'))
   ) {
     const numMatch = q.match(/(\d+)/);
     const delta = numMatch ? Math.min(8, Math.max(1, Number(numMatch[1]))) : 1;
@@ -622,7 +977,9 @@ export async function processRagChatTurn(userMessage, store) {
 
     return {
       text:
-        `🍽️ **Your ${day} Meal Plan (${formatNumber(totalKcal)} kcal total · Mode: ${state.profile.illnessMode})**\n` +
+        `🍽️ **Your ${day} Meal Plan (${formatNumber(totalKcal)} kcal total · Mode: ${
+          state.profile.illnessMode
+        })**\n` +
         `• **Breakfast**: ${plan.breakfast?.name} — ${plan.breakfast?.calories} kcal (${plan.breakfast?.proteinG}g P)\n` +
         `• **Lunch**: ${plan.lunch?.name} — ${plan.lunch?.calories} kcal (${plan.lunch?.proteinG}g P)\n` +
         `• **Snack**: ${plan.snack?.name} — ${plan.snack?.calories} kcal (${plan.snack?.proteinG}g P)\n` +
@@ -671,7 +1028,13 @@ export async function processRagChatTurn(userMessage, store) {
   const todayStats = summarizeDailyLogs(state.foodLogs, getTodayISO());
   const remKcal = Math.max(0, targets.targetCalories - todayStats.calories);
 
-  if (q.includes('diabetes') || q.includes('sugar') || q.includes('pcos') || q.includes('ডায়াবেটিস') || q.includes('সুগার')) {
+  if (
+    q.includes('diabetes') ||
+    q.includes('sugar') ||
+    q.includes('pcos') ||
+    q.includes('ডায়াবেটিস') ||
+    q.includes('সুগার')
+  ) {
     return {
       text:
         `🩸 **Diabetes & Blood Sugar Nutrition Guidance (Bangladesh Context)**\n` +
@@ -683,7 +1046,13 @@ export async function processRagChatTurn(userMessage, store) {
     };
   }
 
-  if (q.includes('sodium') || q.includes('hypertension') || q.includes('pressure') || q.includes('প্রেশার') || q.includes('লবণ')) {
+  if (
+    q.includes('sodium') ||
+    q.includes('hypertension') ||
+    q.includes('pressure') ||
+    q.includes('প্রেশার') ||
+    q.includes('লবণ')
+  ) {
     return {
       text:
         `🫀 **Hypertension & Blood Pressure Guidance**\n` +
@@ -695,28 +1064,44 @@ export async function processRagChatTurn(userMessage, store) {
     };
   }
 
-  if (q.includes('protein') || q.includes('muscle') || q.includes('fat loss') || q.includes('প্রোটিন') || q.includes('ওজন')) {
+  if (
+    q.includes('protein') ||
+    q.includes('muscle') ||
+    q.includes('fat loss') ||
+    q.includes('প্রোটিন') ||
+    q.includes('ওজন')
+  ) {
     return {
       text:
-        `💪 **Personalized Protein & Goal Strategy (${GOAL_ADJUSTMENTS[bio.goal]?.label || 'Body Recomp'})**\n` +
-        `• **Your Target**: **${targets.proteinG}g Protein/day** (~${formatNumber(targets.targetCalories)} kcal, BMR ${targets.bmr} kcal, TDEE ${targets.tdee} kcal)\n` +
-        `• **Today's Progress**: **${todayStats.proteinG}g / ${targets.proteinG}g** logged so far (**${Math.max(0, targets.proteinG - todayStats.proteinG)}g remaining**)\n` +
+        `💪 **Personalized Protein & Goal Strategy (${
+          GOAL_ADJUSTMENTS[bio.goal]?.label || 'Body Recomp'
+        })**\n` +
+        `• **Your Target**: **${targets.proteinG}g Protein/day** (~${formatNumber(
+          targets.targetCalories
+        )} kcal, BMR ${targets.bmr} kcal, TDEE ${targets.tdee} kcal)\n` +
+        `• **Today's Progress**: **${todayStats.proteinG}g / ${targets.proteinG}g** logged so far (**${Math.max(
+          0,
+          targets.proteinG - todayStats.proteinG
+        )}g remaining**)\n` +
         `• **Top High-Protein Desi Options**: Beef Kala Bhuna (43g P), Rui Fish Curry & Rice (42g P), Chicken Curry (38g P), Kacchi Biryani (38g P), Shahi Haleem (32g P).`,
       sources: ['Profile Biometrics', 'Food Catalog'],
       actionBadge: null,
     };
   }
 
-  // --- OPTIONAL GEMINI API ENHANCEMENT (Zero Serverless Function Needed if VITE_GEMINI_API_KEY is set, or uses local grounded response) ---
+  // --- OPTIONAL GEMINI API ENHANCEMENT ---
   const geminiKey =
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || '';
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) ||
+    '';
 
   if (geminiKey) {
     try {
       const systemContext =
         `You are NutriSense RAG AI Assistant for a user in Bangladesh. ` +
         `User: ${state.profile.name}, Age ${bio.age}, ${bio.weightKg}kg, ${bio.heightCm}cm, Goal: ${bio.goal}, ` +
-        `Conditions: ${state.profile.healthConditions.join(', ') || 'None'}, Allergies: ${state.profile.allergies.join(', ') || 'None'}, ` +
+        `Conditions: ${state.profile.healthConditions.join(', ') || 'None'}, Allergies: ${
+          state.profile.allergies.join(', ') || 'None'
+        }, ` +
         `Illness Mode: ${state.profile.illnessMode}. ` +
         `Targets: ${targets.targetCalories} kcal, ${targets.proteinG}g P, ${targets.carbsG}g C, ${targets.fatG}g F, ${targets.sodiumMg}mg Na. ` +
         `Today's Intake: ${todayStats.calories} kcal (${remKcal} kcal left), Water: ${state.hydration.glasses}/${state.hydration.goalGlasses} glasses. ` +
@@ -728,7 +1113,9 @@ export async function processRagChatTurn(userMessage, store) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: `${systemContext}\n\nUser Question: ${userMessage}` }] }],
+            contents: [
+              { role: 'user', parts: [{ text: `${systemContext}\n\nUser Question: ${userMessage}` }] },
+            ],
           }),
         }
       );
@@ -753,13 +1140,21 @@ export async function processRagChatTurn(userMessage, store) {
   return {
     text:
       `👋 **NutriSense RAG Assistant (${state.profile.name})**\n` +
-      `• **Today's Status**: **${formatNumber(todayStats.calories)} / ${formatNumber(targets.targetCalories)} kcal** (${formatNumber(remKcal)} kcal left) · Protein **${todayStats.proteinG}g/${targets.proteinG}g** · Water **${state.hydration.glasses}/${state.hydration.goalGlasses}** glasses\n` +
-      `• **Active Filters**: Conditions: **${state.profile.healthConditions.join(', ') || 'None'}** · Allergies: **${state.profile.allergies.join(', ') || 'None'}** · Mode: **${state.profile.illnessMode}**\n\n` +
+      `• **Today's Status**: **${formatNumber(todayStats.calories)} / ${formatNumber(
+        targets.targetCalories
+      )} kcal** (${formatNumber(remKcal)} kcal left) · Protein **${todayStats.proteinG}g/${
+        targets.proteinG
+      }g** · Water **${state.hydration.glasses}/${state.hydration.goalGlasses}** glasses\n` +
+      `• **Active Filters**: Conditions: **${
+        state.profile.healthConditions.join(', ') || 'None'
+      }** · Allergies: **${state.profile.allergies.join(', ') || 'None'}** · Mode: **${
+        state.profile.illnessMode
+      }**\n\n` +
       `আপনি আমাকে নিচের যেকোনো প্রশ্ন বা কমান্ড দিতে পারেন:\n` +
       `1. **খাবারের ক্যালোরি জানতে**: *"কাচ্চি বিরিয়ানি বা সর্ষে ইলিশে কত ক্যালোরি?"*\n` +
       `2. **মিল সোয়াপ করতে**: *"Swap today's lunch"* বা *"Regenerate Monday"*\n` +
       `3. **খাবার বা পানি লগ করতে**: *"Log bhuna khichuri for lunch"* বা *"Add 1 glass water"*\n` +
-      `4. **রিপোর্ট দেখতে**: *"Show my daily report"*, *"Weekly report"*, বা *"Monthly report"*\n\n` +
+      `4. **রিপোর্ট ও PDF পেতে**: *"Daily report"*, *"Weekly report"*, বা *"Download monthly PDF report"*\n\n` +
       `💡 *Nutri Note (${note.topic}): ${note.note}*`,
     sources: ['Live User Workspace', 'Food Catalog (70+ Dishes)'],
     actionBadge: null,
