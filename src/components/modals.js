@@ -1,3 +1,4 @@
+// src/components/modals.js
 import { icon } from './icons.js';
 import { store } from '../state/store.js';
 import { ASSISTANT_QUICK_REPLIES } from '../data/catalog.js';
@@ -10,6 +11,7 @@ import {
   requestBrowserNotificationPermission,
   triggerNotificationVibration,
 } from '../utils/notificationEffects.js';
+import { exportNutritionReportPDF } from '../services/ragChatbot.js';
 
 export function renderModalsAndAssistant(state, ui) {
   return `
@@ -25,6 +27,14 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function formatAssistantMessage(rawText) {
+  const escaped = escapeHtml(rawText || '');
+  return escaped
+    .replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-zinc-950 dark:text-white">$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em class="italic">$1</em>')
+    .replace(/\n/g, '<br />');
 }
 
 function renderAuthModal(state, ui) {
@@ -402,31 +412,76 @@ function renderNotificationsDrawer(state, ui) {
 
 function renderFloatingAssistant(state, ui) {
   const chatMessages = state.chatHistory
-    .map(
-      (msg) => `
-      <div class="flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}">
-        <div class="max-w-[85%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed ${
-          msg.role === 'user'
+    .map((msg) => {
+      const isUser = msg.role === 'user';
+      const formattedBody = isUser ? escapeHtml(msg.text) : formatAssistantMessage(msg.text);
+
+      const badgeHtml =
+        !isUser && msg.actionBadge
+          ? `<div class="mb-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#B8F527]/20 border border-[#B8F527]/50 text-[10px] font-bold text-[#658C0A] dark:text-[#B8F527]">
+              <span>⚡ ${escapeHtml(msg.actionBadge)}</span>
+            </div>`
+          : '';
+
+      const pdfBtnHtml =
+        !isUser && msg.pdfReportPeriod
+          ? `<div class="mt-2.5">
+              <button
+                type="button"
+                data-export-pdf="${escapeHtml(msg.pdfReportPeriod)}"
+                class="w-full py-1.5 px-3 rounded-xl bg-[#B8F527] hover:bg-[#A8E51B] text-zinc-950 text-[11px] font-bold inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+              >
+                <span>📄 Download ${
+                  Number(msg.pdfReportPeriod) === 1
+                    ? 'Daily'
+                    : Number(msg.pdfReportPeriod) === 7
+                    ? 'Weekly (7-Day)'
+                    : 'Monthly (30-Day)'
+                } PDF Report</span>
+              </button>
+            </div>`
+          : '';
+
+      const sourcesHtml =
+        !isUser && Array.isArray(msg.sources) && msg.sources.length > 0
+          ? `<div class="mt-2 pt-1.5 border-t border-zinc-200/70 dark:border-[#2A2E37] flex flex-wrap items-center gap-1">
+              <span class="text-[9px] font-semibold uppercase tracking-wider text-zinc-400">RAG Sources:</span>
+              ${msg.sources
+                .map(
+                  (src) =>
+                    `<span class="px-1.5 py-0.5 rounded bg-zinc-200/80 dark:bg-[#262A33] text-[9px] font-mono-num text-zinc-600 dark:text-zinc-300">${escapeHtml(src)}</span>`
+                )
+                .join('')}
+            </div>`
+          : '';
+
+      return `
+      <div class="flex flex-col ${isUser ? 'items-end' : 'items-start'}">
+        <div class="max-w-[90%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed ${
+          isUser
             ? 'bg-[#B8F527] text-zinc-950 font-medium rounded-br-sm'
             : 'bg-zinc-100 dark:bg-[#1E2127] text-zinc-800 dark:text-zinc-200 rounded-bl-sm'
         }">
-          ${msg.text}
+          ${badgeHtml}
+          <div>${formattedBody}</div>
+          ${pdfBtnHtml}
+          ${sourcesHtml}
         </div>
-        <span class="mt-1 text-[10px] text-zinc-400">${msg.timeLabel}</span>
+        <span class="mt-1 text-[10px] text-zinc-400">${escapeHtml(msg.timeLabel)}</span>
       </div>
-    `
-    )
+    `;
+    })
     .join('');
 
   const typingHtml = ui.chatTyping
     ? `
       <div class="flex items-start">
         <div class="px-3.5 py-2.5 rounded-2xl bg-zinc-100 dark:bg-[#1E2127] text-zinc-500 dark:text-zinc-400 text-xs flex items-center gap-1.5">
-          <span>Thinking</span>
+          <span>Retrieving &amp; analyzing</span>
           <span class="inline-flex gap-1">
-            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce"></span>
-            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style="animation-delay:0.12s"></span>
-            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style="animation-delay:0.24s"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-[#B8F527] animate-bounce"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-[#B8F527] animate-bounce" style="animation-delay:0.12s"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-[#B8F527] animate-bounce" style="animation-delay:0.24s"></span>
           </span>
         </div>
       </div>
@@ -440,14 +495,17 @@ function renderFloatingAssistant(state, ui) {
           ? `
         <div
           id="assistant-panel"
-          class="w-[calc(100vw-2rem)] sm:w-96 max-h-[72vh] rounded-3xl bg-white dark:bg-[#14161A] border border-zinc-200 dark:border-[#282B33] shadow-2xl flex flex-col overflow-hidden"
+          class="w-[calc(100vw-2rem)] sm:w-[420px] max-h-[76vh] rounded-3xl bg-white dark:bg-[#14161A] border border-zinc-200 dark:border-[#282B33] shadow-2xl flex flex-col overflow-hidden"
           role="dialog"
-          aria-label="NutriSense AI Nutrition Assistant"
+          aria-label="NutriSense RAG Nutrition Assistant"
         >
           <div class="px-4 py-3.5 bg-zinc-50 dark:bg-[#191C22] border-b border-zinc-200 dark:border-[#262932] flex items-center justify-between gap-3">
-            <div>
-              <h3 class="font-display text-sm font-bold text-zinc-950 dark:text-white">Nutrition Assistant</h3>
-              <p class="text-[11px] text-zinc-500 dark:text-zinc-400">Informational guidance · Not medical advice</p>
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-[#B8F527] animate-pulse"></span>
+              <div>
+                <h3 class="font-display text-sm font-bold text-zinc-950 dark:text-white">NutriSense RAG Assistant</h3>
+                <p class="text-[11px] text-zinc-500 dark:text-zinc-400">Food Lookup · Live Meal Swap · Daily/Weekly/Monthly PDF Reports</p>
+              </div>
             </div>
             <button
               type="button"
@@ -457,7 +515,7 @@ function renderFloatingAssistant(state, ui) {
             >${icon('x', 'w-4 h-4')}</button>
           </div>
 
-          <div id="chat-scroll-body" class="flex-1 overflow-y-auto p-4 space-y-3 min-h-[220px] max-h-[340px]">
+          <div id="chat-scroll-body" class="flex-1 overflow-y-auto p-4 space-y-3 min-h-[250px] max-h-[380px]">
             ${chatMessages}
             ${typingHtml}
           </div>
@@ -480,7 +538,7 @@ function renderFloatingAssistant(state, ui) {
             <input
               id="assistant-input"
               type="text"
-              placeholder="Ask about macros, illness foods..."
+              placeholder="Ask calories, 'swap lunch', 'weekly report'..."
               class="flex-1 px-3.5 py-2 rounded-xl bg-zinc-100 dark:bg-[#1C1F25] border border-zinc-200 dark:border-[#2B2E36] text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-[#B8F527]"
             />
             <button
@@ -746,6 +804,17 @@ export function bindModalsAndAssistantEvents(root) {
   root.querySelectorAll('[data-quick-reply]').forEach((btn) =>
     btn.addEventListener('click', () => {
       store.sendChatMessage(btn.getAttribute('data-quick-reply'));
+    })
+  );
+  root.querySelectorAll('[data-export-pdf]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const days = Number(btn.getAttribute('data-export-pdf')) || 7;
+      const ok = exportNutritionReportPDF(store.getState(), days);
+      if (ok) {
+        showToast(`Opened ${days === 1 ? 'Daily' : `${days}-Day`} PDF Report`);
+      } else {
+        showToast('Please allow pop-ups to download the PDF report', 'warning');
+      }
     })
   );
   root.querySelector('#assistant-form')?.addEventListener('submit', (e) => {
