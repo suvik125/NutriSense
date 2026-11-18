@@ -1275,7 +1275,7 @@ class NutriStore {
     }
 
     setTimeout(() => {
-      const reply = generateAssistantReply(trimmed, this.state);
+      const reply = await generateAssistantReply(trimmed, this.state);
       const replyTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       const assistantMsg = {
         id: `chat-a-${Date.now()}`,
