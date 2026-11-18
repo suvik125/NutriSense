@@ -285,15 +285,7 @@ function renderNotificationsDrawer(state, ui) {
         </div>
 
         <div class="flex-1 overflow-y-auto p-5 space-y-6">
-          <section class="space-y-2.5">
-            <div class="flex items-center justify-between">
-              <h3 class="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Recent Feed</h3>
-              <span class="text-[11px] font-mono-num text-zinc-400">${state.notifications.length} item${state.notifications.length === 1 ? '' : 's'}</span>
-            </div>
-            <div class="space-y-2.5">${listHtml}</div>
-          </section>
-
-          <section class="pt-4 border-t border-zinc-200 dark:border-[#23262E] space-y-3.5">
+          <section class="space-y-3.5">
             <h3 class="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Notification Preferences</h3>
 
             <label class="flex items-center justify-between gap-3 cursor-pointer">
@@ -393,6 +385,14 @@ function renderNotificationsDrawer(state, ui) {
                 </label>
               </div>
             </div>
+          </section>
+
+          <section class="pt-4 border-t border-zinc-200 dark:border-[#23262E] space-y-2.5">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Recent Feed</h3>
+              <span class="text-[11px] font-mono-num text-zinc-400">${state.notifications.length} item${state.notifications.length === 1 ? '' : 's'}</span>
+            </div>
+            <div class="space-y-2.5">${listHtml}</div>
           </section>
         </div>
       </div>
