@@ -62,7 +62,7 @@ async function discoverFlashModels(apiKey) {
 }
 
 async function tryGenerate(model, apiKey, prompt) {
-const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(localApiKey)}`; 
   const upstream = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
