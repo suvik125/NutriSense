@@ -1,5 +1,5 @@
 // src/services/ragChatbotService.js
-// Agentic RAG Copilot: Grounded Q&A + Live System Control + PDF Export (Secure Proxy + Zero-Crash Fallback)
+// Agentic RAG Copilot: Grounded Q&A + Live System Control + PDF Export
 
 import { DAYS_OF_WEEK, ILLNESS_OPTIONS, MEAL_CATALOG } from '../data/catalog.js';
 import { YOLO_NUTRITION_DB } from '../data/yoloFoodCatalog.js';
@@ -335,10 +335,6 @@ async function executeSystemActions(rawActions = [], storeInstance) {
   return { executed, pdfAction };
 }
 
-/**
- * Calls Vercel server-side proxy (/api/chat) first so the API key is NEVER exposed in the browser.
- * Falls back to local VITE_GEMINI_API_KEY only during local `npm run dev`.
- */
 async function callGeminiRagEngine(userMessage, ragResult, state) {
   const recentHistory = (state?.chatHistory || [])
     .slice(-6)
@@ -382,7 +378,6 @@ Return ONLY valid JSON with this exact shape:
   "actions": []
 }`;
 
-  // 1. Primary path (Vercel live site): Secure Server-Side Proxy
   try {
     const proxyRes = await fetch('/api/chat', {
       method: 'POST',
@@ -406,18 +401,17 @@ Return ONLY valid JSON with this exact shape:
     // Fall through to local dev fallback if running plain Vite without /api route
   }
 
-  // 2. Local development fallback only (when running `npm run dev` on localhost)
-  const localApiKey = cleanEnv(import.meta.env.VITE_GEMINI_API_KEY);
-  if (!localApiKey) return null;
+  const devApiKey = cleanEnv(import.meta.env?.VITE_GEMINI_API_KEY);
+  if (!devApiKey) return null;
 
-  const preferredModel = cleanEnv(import.meta.env.VITE_GEMINI_MODEL) || 'gemini-2.5-flash';
+  const preferredModel = cleanEnv(import.meta.env?.VITE_GEMINI_MODEL) || 'gemini-2.5-flash';
   const candidateModels = Array.from(
     new Set([preferredModel, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'])
   );
 
   for (const model of candidateModels) {
     try {
-      const endpoint = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(localApiKey)}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(devApiKey)}`;
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
