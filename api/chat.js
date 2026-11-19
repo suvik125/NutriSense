@@ -34,8 +34,8 @@ function extractJsonPayload(rawText) {
 async function discoverFlashModels(apiKey) {
   try {
     const res = await fetch(
-      `[https://generativelanguage.googleapis.com/v1beta/models?key=$](https://generativelanguage.googleapis.com/v1beta/models?key=$){encodeURIComponent(apiKey)}`
-    );
+  `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`
+);
     if (!res.ok) return [];
     const data = await res.json();
     const models = Array.isArray(data?.models) ? data.models : [];
@@ -66,7 +66,7 @@ async function discoverFlashModels(apiKey) {
 }
 
 async function tryGenerate(model, apiKey, prompt) {
-  const endpoint = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const upstream = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
