@@ -1,5 +1,5 @@
 // src/services/ragChatbotService.js
-// Agentic RAG Copilot: Grounded Q&A + Live System Control + PDF Export (with zero-crash fallback)
+// Agentic RAG Copilot: Grounded Q&A + Live System Control + PDF Export (Secure Proxy + Zero-Crash Fallback)
 
 import { DAYS_OF_WEEK, ILLNESS_OPTIONS, MEAL_CATALOG } from '../data/catalog.js';
 import { YOLO_NUTRITION_DB } from '../data/yoloFoodCatalog.js';
@@ -22,6 +22,13 @@ const VALID_ILLNESSES = new Set(['none', 'fever', 'cold', 'stomach', 'sore_throa
 const VALID_SLOTS = new Set(['breakfast', 'lunch', 'snack', 'dinner']);
 const VALID_REPORTS = new Set(['meal_plan', 'food_logs', 'nutrition_profile', 'full_report']);
 
+function cleanEnv(val) {
+  return String(val || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim();
+}
+
 function normalizeDay(input, fallbackDay = 'Mon') {
   const raw = String(input || '').trim().toLowerCase();
   const map = {
@@ -40,10 +47,8 @@ function findFoodInDatabases(foodQuery) {
   const q = String(foodQuery || '').toLowerCase().trim();
   if (!q) return null;
 
-  // 1. Direct key match in YOLO DB
   if (YOLO_NUTRITION_DB[q]) return YOLO_NUTRITION_DB[q];
 
-  // 2. Fuzzy match in YOLO DB
   const yoloList = Object.values(YOLO_NUTRITION_DB);
   const yoloMatch =
     yoloList.find((item) => item.key.replace(/_/g, ' ') === q) ||
@@ -51,14 +56,12 @@ function findFoodInDatabases(foodQuery) {
     yoloList.find((item) => q.includes(item.key.replace(/_/g, ' ')));
   if (yoloMatch) return yoloMatch;
 
-  // 3. Match in MEAL_CATALOG
   const catalogItems = Object.values(MEAL_CATALOG).flat();
   const catMatch =
     catalogItems.find((m) => m.name.toLowerCase().includes(q)) ||
     catalogItems.find((m) => q.includes(m.name.toLowerCase()));
   if (catMatch) return catMatch;
 
-  // 4. Token overlap fallback
   const tokens = q.split(/\s+/).filter((w) => w.length >= 3);
   if (tokens.length > 0) {
     let best = null;
@@ -77,15 +80,10 @@ function findFoodInDatabases(foodQuery) {
   return null;
 }
 
-/**
- * Deterministic intent detector — guarantees system commands & PDF exports always work
- * even when offline, rate-limited, or without a Gemini API key.
- */
 function detectDeterministicActions(userMessage, state) {
   const q = String(userMessage || '').toLowerCase();
   const actions = [];
 
-  // 1. PDF Export commands
   if (/\b(pdf|download|export|print|report)\b/i.test(q)) {
     let reportType = 'full_report';
     if (/\b(meal\s*plan|weekly|diet\s*plan|routine)\b/i.test(q)) {
@@ -100,7 +98,6 @@ function detectDeterministicActions(userMessage, state) {
     }
   }
 
-  // 2. Theme switching
   if (/\b(dark\s*mode|dark\s*theme)\b/i.test(q)) {
     actions.push({ type: 'set_theme', theme: 'dark' });
   } else if (/\b(light\s*mode|light\s*theme)\b/i.test(q)) {
@@ -109,7 +106,6 @@ function detectDeterministicActions(userMessage, state) {
     actions.push({ type: 'set_theme', theme: 'toggle' });
   }
 
-  // 3. Illness / Recovery Mode activation
   const wantsIllnessChange =
     /\b(mode|activate|set|switch|turn\s*on|have|feeling|sick|ill|recover|recovering|amar|ache|hoyeche)\b/i.test(q);
   if (wantsIllnessChange) {
@@ -128,7 +124,6 @@ function detectDeterministicActions(userMessage, state) {
     }
   }
 
-  // 4. Water / Hydration Logging
   const waterMatch = q.match(/(?:log|add|drank|drink|khaisi|kheyechi)\s+(\d+)?\s*(?:glass|glasses|cup|cups)?\s*(?:of\s+)?(?:water|pani|jol)/i);
   if (waterMatch) {
     const qty = Math.max(1, Math.min(8, Number(waterMatch[1]) || 1));
@@ -137,7 +132,6 @@ function detectDeterministicActions(userMessage, state) {
     actions.push({ type: 'log_water', reset: true });
   }
 
-  // 5. Meal Plan Regenerate / Swap
   if (/\b(regenerate|refresh|new)\b.*\b(weekly|week|full)\b.*\b(meal|plan)\b/i.test(q)) {
     actions.push({ type: 'regenerate_meal_plan' });
   } else if (/\b(regenerate|refresh)\b.*\b(today|mon|tue|wed|thu|fri|sat|sun|day|meal\s*plan)\b/i.test(q)) {
@@ -156,7 +150,6 @@ function detectDeterministicActions(userMessage, state) {
     });
   }
 
-  // 6. Food Logging from DB (e.g. "Log 1 plate Rui Fish Curry for lunch")
   if (/\b(log|add|record|track)\b/i.test(q) && !/\b(water|pani|jol|pdf|food\s*log)\b/i.test(q)) {
     const mealTypeMatch = q.match(/\b(breakfast|lunch|snack|dinner)\b/i);
     const cleanedFoodPhrase = q
@@ -176,7 +169,6 @@ function detectDeterministicActions(userMessage, state) {
     }
   }
 
-  // 7. Navigation commands
   if (/\b(open|go\s*to|show|navigate|switch\s*to)\b/i.test(q)) {
     if (/\b(planner|meal\s*plan)\b/i.test(q) && !/\b(pdf|download|export)\b/i.test(q)) {
       actions.push({ type: 'navigate', view: 'planner' });
@@ -196,9 +188,6 @@ function detectDeterministicActions(userMessage, state) {
   return actions;
 }
 
-/**
- * Executes validated system actions directly against NutriStore.
- */
 async function executeSystemActions(rawActions = [], storeInstance) {
   const executed = [];
   let pdfAction = null;
@@ -347,15 +336,10 @@ async function executeSystemActions(rawActions = [], storeInstance) {
 }
 
 /**
- * Calls Gemini with strict JSON structured output (grounded in retrieved RAG chunks + tool schema).
+ * Calls Vercel server-side proxy (/api/chat) first so the API key is NEVER exposed in the browser.
+ * Falls back to local VITE_GEMINI_API_KEY only during local `npm run dev`.
  */
 async function callGeminiRagEngine(userMessage, ragResult, state) {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-  if (!apiKey) return null;
-
-  const preferredModel = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash';
-  const candidateModels = Array.from(new Set([preferredModel, 'gemini-2.0-flash']));
-
   const recentHistory = (state?.chatHistory || [])
     .slice(-6)
     .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
@@ -398,9 +382,42 @@ Return ONLY valid JSON with this exact shape:
   "actions": []
 }`;
 
+  // 1. Primary path (Vercel live site): Secure Server-Side Proxy
+  try {
+    const proxyRes = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    if (proxyRes.ok) {
+      const contentType = proxyRes.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const parsed = await proxyRes.json();
+        if (parsed && typeof parsed.reply === 'string') {
+          return {
+            reply: parsed.reply,
+            actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+            mode: parsed.mode || 'gemini-rag-server',
+          };
+        }
+      }
+    }
+  } catch {
+    // Fall through to local dev fallback if running plain Vite without /api route
+  }
+
+  // 2. Local development fallback only (when running `npm run dev` on localhost)
+  const localApiKey = cleanEnv(import.meta.env.VITE_GEMINI_API_KEY);
+  if (!localApiKey) return null;
+
+  const preferredModel = cleanEnv(import.meta.env.VITE_GEMINI_MODEL) || 'gemini-2.5-flash';
+  const candidateModels = Array.from(
+    new Set([preferredModel, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'])
+  );
+
   for (const model of candidateModels) {
     try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const endpoint = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(localApiKey)}`;
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -424,21 +441,17 @@ Return ONLY valid JSON with this exact shape:
         return {
           reply: parsed.reply,
           actions: Array.isArray(parsed.actions) ? parsed.actions : [],
-          mode: `gemini-rag (${model})`,
+          mode: `gemini-rag-local (${model})`,
         };
       }
     } catch {
-      // Try next model or fall through to local RAG synthesizer
+      // Try next candidate
     }
   }
 
   return null;
 }
 
-/**
- * Local Grounded RAG Synthesizer — guarantees a smart, accurate response from retrieved chunks
- * even if API key is not configured or internet drops during a competition demo.
- */
 function buildLocalRagFallbackReply(userMessage, ragResult, state, executedActions) {
   const today = getTodayISO();
   const todayTotals = summarizeDailyLogs(state?.foodLogs || [], today);
@@ -454,30 +467,34 @@ function buildLocalRagFallbackReply(userMessage, ragResult, state, executedActio
     lines.push('');
   }
 
-  // Extract top non-profile retrieved chunks to answer the user's question directly
-  const domainChunks = ragResult.retrievedChunks.filter((c) => c.id !== 'live:user_profile').slice(0, 3);
+  const domainChunks = ragResult.retrievedChunks
+    .filter((c) => !c.id.startsWith('live:'))
+    .slice(0, 3);
 
-  if (/\b(remaining|left|today|koto|ajker|calorie|macro|status|progress)\b/i.test(userMessage)) {
+  if (domainChunks.length > 0) {
+    lines.push(`**Grounded NutriSense Knowledge:**`);
+    domainChunks.forEach((chunk) => {
+      const idx = ragResult.retrievedChunks.findIndex((c) => c.id === chunk.id) + 1;
+      const warn =
+        chunk.allergyConflicts.length > 0
+          ? ` *(Allergy Alert: ${chunk.allergyConflicts.join(', ')})*`
+          : '';
+      lines.push(
+        `- **${chunk.title} [S${idx}]${warn}:** ${chunk.content.slice(0, 220)}${chunk.content.length > 220 ? '...' : ''}`
+      );
+    });
+    lines.push('');
+  }
+
+  if (
+    domainChunks.length === 0 ||
+    /\b(remaining|left|today|target|koto|ajker|progress|compare)\b/i.test(userMessage)
+  ) {
     lines.push(
       `**Today's Progress (${today}) [S1]:**`,
       `- **Consumed:** ${todayTotals.calories} / ${targets.targetCalories} kcal (**${remainingKcal} kcal left**)`,
       `- **Macros Logged:** ${todayTotals.proteinG}g Protein (${remainingProtein}g left) · ${todayTotals.carbsG}g Carbs · ${todayTotals.fatG}g Fat`,
       `- **Hydration:** ${state?.hydration?.glasses || 0}/${state?.hydration?.goalGlasses || 8} glasses`
-    );
-  } else if (domainChunks.length > 0) {
-    lines.push(`**Grounded NutriSense Knowledge:**`);
-    domainChunks.forEach((chunk, i) => {
-      const refNum = i + 2;
-      const warn =
-        chunk.allergyConflicts.length > 0
-          ? ` *(Allergy Alert: ${chunk.allergyConflicts.join(', ')})*`
-          : '';
-      lines.push(`- **${chunk.title} [S${refNum}]${warn}:** ${chunk.content.slice(0, 220)}${chunk.content.length > 220 ? '...' : ''}`);
-    });
-  } else {
-    lines.push(
-      `Your active target is **${targets.targetCalories} kcal/day** (**${targets.proteinG}g** protein, **${targets.carbsG}g** carbs, **${targets.fatG}g** fat) [S1].`,
-      `You can ask me nutrition questions, control the app (theme, illness mode, meal swap, water/food logging), or download PDF reports.`
     );
   }
 
@@ -485,18 +502,13 @@ function buildLocalRagFallbackReply(userMessage, ragResult, state, executedActio
   return lines.join('\n');
 }
 
-/**
- * Main entry point called by store.js
- */
 export async function processRagChatMessage(userMessage, storeInstance) {
   const stateBefore = storeInstance.getState();
   const ragResult = retrieveRagContext(userMessage, stateBefore, 6);
 
-  // Run Gemini RAG + Deterministic Command Detector
   const deterministicActions = detectDeterministicActions(userMessage, stateBefore);
   const geminiResult = await callGeminiRagEngine(userMessage, ragResult, stateBefore);
 
-  // Merge LLM actions + deterministic actions cleanly (deduplicated inside executor)
   const combinedActions = [
     ...(geminiResult?.actions || []),
     ...deterministicActions,
