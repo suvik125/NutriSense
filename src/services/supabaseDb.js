@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient.js';
 import {
   deriveInitials,
+  isHealthProfileCompleted,
   mapChatRowToState,
   mapFoodLogRowToState,
   mapFoodLogToRow,
@@ -15,6 +16,7 @@ import {
   mapTargetsToRow,
   mapUserProfileToRow,
 } from '../utils/dbMappers.js';
+import { calculateNutritionPlan } from '../utils/nutrition.js';
 
 function assertNoError(error, context) {
   if (!error) return;
@@ -100,24 +102,27 @@ export async function fetchUserWorkspace(user, defaults) {
     profileRow = data;
   }
 
-  // 2. Health Profile
-  let healthRow = healthRes.data;
-  if (!healthRow) {
-    const { data, error } = await supabase
-      .from('user_health_profiles')
-      .upsert(mapHealthProfileToRow(userId, defaults.profile), { onConflict: 'user_id' })
-      .select()
-      .single();
-    assertNoError(error, 'Failed to initialize health profile');
-    healthRow = data;
-  }
+  // 2. Health Profile (do NOT auto-seed default biometrics before user submits Profile Setup)
+  const healthRow = healthRes.data;
+  const hasSavedHealthProfile = isHealthProfileCompleted(healthRow);
+  const healthState = hasSavedHealthProfile
+    ? mapHealthRowToState(healthRow)
+    : {
+        biometrics: defaults.profile.biometrics,
+        healthConditions: defaults.profile.healthConditions,
+        allergies: defaults.profile.allergies,
+      };
 
-  // 3. Nutrition Targets
+  // 3. Nutrition Targets (only initialize in DB once user has a saved health profile)
   let targetsRow = targetsRes.data;
-  if (!targetsRow) {
+  if (!targetsRow && hasSavedHealthProfile) {
+    const computedTargets = calculateNutritionPlan(
+      healthState.biometrics,
+      healthState.healthConditions
+    );
     const { data, error } = await supabase
       .from('nutrition_targets')
-      .upsert(mapTargetsToRow(userId, defaults.nutritionTargets), { onConflict: 'user_id' })
+      .upsert(mapTargetsToRow(userId, computedTargets), { onConflict: 'user_id' })
       .select()
       .single();
     assertNoError(error, 'Failed to initialize nutrition targets');
@@ -200,10 +205,10 @@ export async function fetchUserWorkspace(user, defaults) {
     chatRows = chatRows.map(mapChatRowToState);
   }
 
-  const healthState = mapHealthRowToState(healthRow);
   const mealPlan = mapMealPlanRowsToState(planRow, planItemRows);
 
   return {
+    hasSavedHealthProfile,
     theme: profileRow.theme === 'light' ? 'light' : 'dark',
     selectedPlannerDay: profileRow.selected_planner_day || 'Wed',
     chartRangeDays: profileRow.chart_range_days === 30 ? 30 : 7,
@@ -217,7 +222,7 @@ export async function fetchUserWorkspace(user, defaults) {
       healthConditions: healthState.healthConditions,
       allergies: healthState.allergies,
     },
-    nutritionTargets: mapTargetsRowToState(targetsRow),
+    nutritionTargets: targetsRow ? mapTargetsRowToState(targetsRow) : defaults.nutritionTargets,
     mealPlan,
     foodLogs: (foodLogsRes.data || []).map(mapFoodLogRowToState),
     notificationPrefs: mapNotifPrefsRowToState(prefsRow),

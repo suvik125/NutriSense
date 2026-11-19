@@ -162,6 +162,9 @@ window.addEventListener('popstate', () => {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     const ui = store.getUI();
+    if (ui.profileSetupModalOpen) {
+      store.dismissProfileSetupModal();
+    }
     if (ui.authModalOpen || ui.notificationsOpen || ui.chatOpen) {
       store.setUI({
         authModalOpen: false,

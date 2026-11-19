@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   deriveInitials,
+  isHealthProfileCompleted,
   mapChatRowToState,
   mapFoodLogRowToState,
   mapFoodLogToRow,
@@ -46,6 +47,17 @@ test('health profile round-trip mapping preserves biometrics, conditions, and al
 
   const roundTrip = mapHealthRowToState(row);
   assert.deepEqual(roundTrip, profile);
+});
+
+test('isHealthProfileCompleted detects missing vs saved health profile rows', () => {
+  assert.equal(isHealthProfileCompleted(null), false);
+  assert.equal(isHealthProfileCompleted(undefined), false);
+  assert.equal(isHealthProfileCompleted({ user_id: 'u1' }), false);
+  assert.equal(isHealthProfileCompleted({ user_id: 'u1', age: 0, height_cm: 170, weight_kg: 70 }), false);
+  assert.equal(
+    isHealthProfileCompleted({ user_id: 'u1', age: 27, height_cm: 172, weight_kg: 68 }),
+    true
+  );
 });
 
 test('nutrition targets round-trip preserves all macro and micro values', () => {

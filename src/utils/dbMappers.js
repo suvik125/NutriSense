@@ -64,6 +64,16 @@ export function mapHealthRowToState(row) {
   };
 }
 
+export function isHealthProfileCompleted(healthRow) {
+  if (!healthRow || typeof healthRow !== 'object') return false;
+  return (
+    Boolean(healthRow.user_id) &&
+    Number(healthRow.age) > 0 &&
+    Number(healthRow.height_cm) > 0 &&
+    Number(healthRow.weight_kg) > 0
+  );
+}
+
 export function mapTargetsToRow(userId, targets) {
   return {
     user_id: userId,

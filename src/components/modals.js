@@ -4,6 +4,8 @@ import { ASSISTANT_QUICK_REPLIES } from '../data/catalog.js';
 import { showToast } from './toast.js';
 import { supabase } from '../supabaseClient.js';
 import { isWithinQuietHours } from '../utils/notifications.js';
+import { renderProfileFormFieldsHTML } from './profileForm.js';
+import { ftInToCm, lbToKg } from '../utils/nutrition.js';
 import {
   getBrowserNotificationPermission,
   playNotificationChime,
@@ -11,9 +13,27 @@ import {
   triggerNotificationVibration,
 } from '../utils/notificationEffects.js';
 
+let setupDraftBio = null;
+let setupDraftConditions = null;
+let setupDraftAllergies = null;
+let setupDraftUserId = null;
+let setupIsSaving = false;
+
+function ensureSetupDraft(state, forceReset = false) {
+  const ownerKey = state.authUserId || 'guest';
+  if (forceReset || !setupDraftBio || setupDraftUserId !== ownerKey) {
+    setupDraftBio = { ...state.profile.biometrics };
+    setupDraftConditions = [...(state.profile.healthConditions || [])];
+    setupDraftAllergies = [...(state.profile.allergies || [])];
+    setupDraftUserId = ownerKey;
+    setupIsSaving = false;
+  }
+}
+
 export function renderModalsAndAssistant(state, ui) {
   return `
     ${renderAuthModal(state, ui)}
+    ${renderProfileSetupModal(state, ui)}
     ${renderNotificationsDrawer(state, ui)}
     ${renderFloatingAssistant(state, ui)}
   `;
@@ -188,6 +208,57 @@ function renderAuthModal(state, ui) {
         <p class="mt-3 text-[11px] text-center text-zinc-500 dark:text-zinc-400">
           Simulated local prototype authentication. Data stays in your browser.
         </p>
+      </div>
+    </div>
+  `;
+}
+
+function renderProfileSetupModal(state, ui) {
+  if (!ui.profileSetupModalOpen) return '';
+  ensureSetupDraft(state);
+
+  return `
+    <div
+      id="profile-setup-backdrop"
+      class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="profile-setup-title"
+    >
+      <div
+        id="profile-setup-card"
+        class="w-full max-w-2xl rounded-3xl bg-white dark:bg-[#131518] border border-zinc-200 dark:border-[#24272F] p-5 sm:p-7 shadow-2xl max-h-[90vh] overflow-y-auto my-auto space-y-6"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold text-[#658C0A] dark:text-[#B8F527]">Personalized Nutrition Setup</p>
+            <h2 id="profile-setup-title" class="font-display text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white mt-1">
+              Complete Your Nutrition Profile
+            </h2>
+            <p class="mt-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+              Set your biometrics, daily movement, goals, and sensitivities to personalize your daily calorie, macro, and meal plan targets.
+            </p>
+          </div>
+          <button
+            type="button"
+            data-action="close-profile-setup"
+            aria-label="Close profile setup dialog"
+            class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center bg-zinc-100 dark:bg-[#1E2127] text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors"
+          >
+            ${icon('x', 'w-4 h-4')}
+          </button>
+        </div>
+
+        <form id="profile-setup-form" class="space-y-6">
+          ${renderProfileFormFieldsHTML({
+            prefix: 'setup',
+            draftBio: setupDraftBio,
+            draftConditions: setupDraftConditions,
+            draftAllergies: setupDraftAllergies,
+            resetAction: 'reset-profile-setup',
+            isSaving: setupIsSaving,
+          })}
+        </form>
       </div>
     </div>
   `;
@@ -659,6 +730,160 @@ export function bindModalsAndAssistantEvents(root) {
       }
     }
   });
+
+  // One-Time Profile Setup Modal
+  const closeProfileSetup = () => {
+    setupDraftBio = null;
+    setupDraftConditions = null;
+    setupDraftAllergies = null;
+    setupDraftUserId = null;
+    setupIsSaving = false;
+    store.dismissProfileSetupModal();
+  };
+
+  root.querySelectorAll('[data-action="close-profile-setup"]').forEach((el) =>
+    el.addEventListener('click', closeProfileSetup)
+  );
+
+  const bindProfileSetupFormEvents = () => {
+    const formEl = root.querySelector('#profile-setup-form');
+    if (!formEl) return;
+
+    const refreshSetupForm = () => {
+      formEl.innerHTML = renderProfileFormFieldsHTML({
+        prefix: 'setup',
+        draftBio: setupDraftBio,
+        draftConditions: setupDraftConditions,
+        draftAllergies: setupDraftAllergies,
+        resetAction: 'reset-profile-setup',
+        isSaving: setupIsSaving,
+      });
+      bindProfileSetupFormEvents();
+    };
+
+    const ageInput = formEl.querySelector('#setup-age');
+    ageInput?.addEventListener('input', () => {
+      setupDraftBio.age = Math.max(13, Math.min(100, Number(ageInput.value) || 28));
+    });
+
+    formEl.querySelectorAll('[data-setup-gender]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        setupDraftBio.gender = btn.getAttribute('data-setup-gender');
+        refreshSetupForm();
+      })
+    );
+
+    formEl.querySelectorAll('[data-setup-height-unit]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        setupDraftBio.heightUnit = btn.getAttribute('data-setup-height-unit');
+        refreshSetupForm();
+      })
+    );
+
+    formEl.querySelectorAll('[data-setup-weight-unit]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        setupDraftBio.weightUnit = btn.getAttribute('data-setup-weight-unit');
+        refreshSetupForm();
+      })
+    );
+
+    formEl.querySelector('#setup-height-cm')?.addEventListener('input', (e) => {
+      setupDraftBio.heightCm = Math.max(100, Math.min(240, Number(e.target.value) || 170));
+    });
+
+    const syncSetupFtIn = () => {
+      const ft = Number(formEl.querySelector('#setup-height-ft')?.value) || 5;
+      const inch = Number(formEl.querySelector('#setup-height-in')?.value) || 0;
+      setupDraftBio.heightCm = ftInToCm(ft, inch);
+    };
+    formEl.querySelector('#setup-height-ft')?.addEventListener('input', syncSetupFtIn);
+    formEl.querySelector('#setup-height-in')?.addEventListener('input', syncSetupFtIn);
+
+    formEl.querySelector('#setup-weight')?.addEventListener('input', (e) => {
+      const val = Number(e.target.value) || 70;
+      setupDraftBio.weightKg = setupDraftBio.weightUnit === 'kg' ? val : lbToKg(val);
+    });
+
+    formEl.querySelector('#setup-job')?.addEventListener('change', (e) => {
+      setupDraftBio.jobType = e.target.value;
+    });
+
+    formEl.querySelector('#setup-activity')?.addEventListener('change', (e) => {
+      setupDraftBio.activityLevel = e.target.value;
+    });
+
+    formEl.querySelectorAll('[data-setup-goal]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        setupDraftBio.goal = btn.getAttribute('data-setup-goal');
+        refreshSetupForm();
+      })
+    );
+
+    formEl.querySelectorAll('[data-setup-condition]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const cond = btn.getAttribute('data-setup-condition');
+        if (setupDraftConditions.includes(cond)) {
+          setupDraftConditions = setupDraftConditions.filter((c) => c !== cond);
+        } else {
+          setupDraftConditions = [...setupDraftConditions, cond];
+        }
+        refreshSetupForm();
+      })
+    );
+
+    formEl.querySelectorAll('[data-setup-allergy]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const alg = btn.getAttribute('data-setup-allergy');
+        if (setupDraftAllergies.includes(alg)) {
+          setupDraftAllergies = setupDraftAllergies.filter((a) => a !== alg);
+        } else {
+          setupDraftAllergies = [...setupDraftAllergies, alg];
+        }
+        refreshSetupForm();
+      })
+    );
+
+    formEl.querySelector('[data-action="reset-profile-setup"]')?.addEventListener('click', () => {
+      ensureSetupDraft(store.getState(), true);
+      refreshSetupForm();
+      showToast('Reset form to saved defaults');
+    });
+  };
+
+  const setupForm = root.querySelector('#profile-setup-form');
+  if (setupForm) {
+    bindProfileSetupFormEvents();
+    setupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (setupIsSaving) return;
+      setupIsSaving = true;
+      const submitBtn = setupForm.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        const label = submitBtn.querySelector('span');
+        if (label) label.textContent = 'Saving Profile...';
+      }
+
+      const result = await store.saveProfileAndTargets({
+        biometrics: setupDraftBio,
+        healthConditions: setupDraftConditions,
+        allergies: setupDraftAllergies,
+      });
+
+      setupIsSaving = false;
+      if (result?.ok !== false) {
+        setupDraftBio = null;
+        setupDraftConditions = null;
+        setupDraftAllergies = null;
+        setupDraftUserId = null;
+        showToast('Saved targets to your profile & synced meal plan');
+      } else if (submitBtn) {
+        submitBtn.disabled = false;
+        const label = submitBtn.querySelector('span');
+        if (label) label.textContent = 'Save to Profile';
+      }
+    });
+  }
 
   // Notifications Drawer
   root.querySelectorAll('[data-action="close-notifications"]').forEach((el) =>

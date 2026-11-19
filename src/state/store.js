@@ -488,11 +488,13 @@ class NutriStore {
     this.listeners = new Set();
     this._hydratedUserId = null;
     this._hydrationPromise = null;
+    this._dismissedProfileSetupUsers = new Set();
     this.ui = {
       authModalOpen: false,
       authModalTab: 'login',
       authPrefillEmail: '',
       authSuccessMessage: '',
+      profileSetupModalOpen: false,
       notificationsOpen: false,
       chatOpen: false,
       chatTyping: false,
@@ -601,14 +603,17 @@ class NutriStore {
       try {
         const defaults = createInitialState(this.state.theme);
         const workspace = await fetchUserWorkspace(user, defaults);
+        const { hasSavedHealthProfile, ...workspaceState } = workspace;
         const localBrowserPrefs = readLocalBrowserPrefs();
         const storedHydration = readStoredHydration(getTodayISO());
         this._hydratedUserId = user.id;
+        const shouldShowProfileSetup =
+          !hasSavedHealthProfile && !this._dismissedProfileSetupUsers.has(user.id);
         this.setState({
-          ...workspace,
+          ...workspaceState,
           notificationPrefs: {
             ...defaults.notificationPrefs,
-            ...workspace.notificationPrefs,
+            ...workspaceState.notificationPrefs,
             ...localBrowserPrefs,
           },
           hydration: storedHydration,
@@ -623,6 +628,7 @@ class NutriStore {
           authModalOpen: false,
           authPrefillEmail: '',
           authSuccessMessage: '',
+          profileSetupModalOpen: shouldShowProfileSetup,
         });
         return this.state;
       } catch (err) {
@@ -657,6 +663,7 @@ class NutriStore {
           authModalOpen: false,
           authPrefillEmail: '',
           authSuccessMessage: '',
+          profileSetupModalOpen: false,
         });
         showToast(message, 'error');
         return null;
@@ -758,6 +765,7 @@ class NutriStore {
         ...fresh,
         activeView: PRIVATE_VIEWS.has(this.state.activeView) ? 'home' : this.state.activeView,
       });
+      this.setUI({ profileSetupModalOpen: false });
     }
   }
 
@@ -787,6 +795,7 @@ class NutriStore {
       authModalOpen: false,
       authPrefillEmail: '',
       authSuccessMessage: '',
+      profileSetupModalOpen: false,
       syncError: '',
     });
     this.addNotification({
@@ -796,15 +805,23 @@ class NutriStore {
     });
   }
 
+  dismissProfileSetupModal() {
+    if (this.state.authUserId) {
+      this._dismissedProfileSetupUsers.add(this.state.authUserId);
+    }
+    this.setUI({ profileSetupModalOpen: false });
+  }
+
   async signOut() {
     const wasPrivate = PRIVATE_VIEWS.has(this.state.activeView);
     this._hydratedUserId = null;
+    this._dismissedProfileSetupUsers.clear();
     const fresh = createInitialState(this.state.theme);
     this.setState({
       ...fresh,
       activeView: wasPrivate ? 'home' : this.state.activeView,
     });
-    this.setUI({ syncError: '' });
+    this.setUI({ syncError: '', profileSetupModalOpen: false });
     try {
       localStorage.removeItem(DEMO_STORAGE_KEY);
       localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -860,11 +877,19 @@ class NutriStore {
 
     if (this.isSupabaseUser()) {
       const userId = this.state.authUserId;
-      await this.runDbSync(async () => {
+      const syncResult = await this.runDbSync(async () => {
         await upsertProfileHealthAndTargets(userId, this.state);
         const savedPlan = await upsertMealPlanAndItems(userId, this.state.mealPlan);
         this.setState({ mealPlan: savedPlan });
       });
+      if (!syncResult.ok) {
+        return syncResult;
+      }
+      this._dismissedProfileSetupUsers.delete(userId);
+    }
+
+    if (this.ui.profileSetupModalOpen) {
+      this.setUI({ profileSetupModalOpen: false });
     }
 
     this.addNotification({
@@ -872,6 +897,8 @@ class NutriStore {
       message: `Saved ~${nextTargets.targetCalories} kcal/day target (${nextTargets.proteinG}g P · ${nextTargets.carbsG}g C · ${nextTargets.fatG}g F) and synced your meal plan.`,
       category: 'Profile',
     });
+
+    return { ok: true };
   }
 
   async setIllnessMode(illnessId) {
