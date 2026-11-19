@@ -196,7 +196,7 @@ export async function fetchUserWorkspace(user, defaults) {
   if (chatRows.length === 0) {
     const initialChat = defaults.chatHistory[0] || {
       role: 'assistant',
-      text: 'Hello! Ask me about macro targets, gentle foods when feeling unwell, or sodium and fiber balance. Nutrition estimates are informational and not medical advice.',
+      text: 'Hello! I am **NutriSense AI Copilot** (RAG + System Control). Ask me about Bangladeshi/global food nutrition, control your meal plan, log water or meals, activate illness recovery mode, or export your data as an **A4 PDF**.',
       timeLabel: 'Now',
     };
     const savedMsg = await insertChatMessage(userId, initialChat);
@@ -397,4 +397,12 @@ export async function insertChatMessage(userId, msg) {
     .single();
   assertNoError(error, 'Failed to save chat message');
   return mapChatRowToState(data);
+}
+
+export async function clearChatMessageRows(userId) {
+  const { error } = await supabase
+    .from('ai_chat_messages')
+    .delete()
+    .eq('user_id', userId);
+  assertNoError(error, 'Failed to clear chat history');
 }
