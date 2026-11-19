@@ -93,7 +93,11 @@ function executeTool(name, args = {}) {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(matches.length ? matches : { message: 'No exact match found', available: FOOD_DB.map((f) => f.name) }),
+            text: JSON.stringify(
+              matches.length
+                ? matches
+                : { message: 'No exact match found', available: FOOD_DB.map((f) => f.name) }
+            ),
           },
         ],
       };
@@ -153,6 +157,14 @@ function executeTool(name, args = {}) {
 }
 
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method === 'GET') {
     return res.status(200).json({
       server: 'nutrisense-mcp-server',
@@ -181,6 +193,10 @@ export default async function handler(req, res) {
           serverInfo: { name: 'nutrisense-mcp-server', version: '1.0.0' },
         },
       });
+    }
+
+    if (method === 'notifications/initialized') {
+      return res.status(200).json({ jsonrpc: '2.0', result: {} });
     }
 
     if (method === 'tools/list') {
