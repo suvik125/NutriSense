@@ -1,6 +1,5 @@
 import { icon } from './icons.js';
 import { store } from '../state/store.js';
-import { ASSISTANT_QUICK_REPLIES } from '../data/catalog.js';
 import { showToast } from './toast.js';
 import { supabase } from '../supabaseClient.js';
 import { isWithinQuietHours } from '../utils/notifications.js';
@@ -12,6 +11,7 @@ import {
   requestBrowserNotificationPermission,
   triggerNotificationVibration,
 } from '../utils/notificationEffects.js';
+import { renderRagChatbot, bindRagChatbotEvents } from './ragChatbot.js';
 
 let setupDraftBio = null;
 let setupDraftConditions = null;
@@ -35,7 +35,7 @@ export function renderModalsAndAssistant(state, ui) {
     ${renderAuthModal(state, ui)}
     ${renderProfileSetupModal(state, ui)}
     ${renderNotificationsDrawer(state, ui)}
-    ${renderFloatingAssistant(state, ui)}
+    ${renderRagChatbot(state, ui)}
   `;
 }
 
@@ -471,113 +471,6 @@ function renderNotificationsDrawer(state, ui) {
   `;
 }
 
-function renderFloatingAssistant(state, ui) {
-  const chatMessages = state.chatHistory
-    .map(
-      (msg) => `
-      <div class="flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}">
-        <div class="max-w-[85%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed ${
-          msg.role === 'user'
-            ? 'bg-[#B8F527] text-zinc-950 font-medium rounded-br-sm'
-            : 'bg-zinc-100 dark:bg-[#1E2127] text-zinc-800 dark:text-zinc-200 rounded-bl-sm'
-        }">
-          ${msg.text}
-        </div>
-        <span class="mt-1 text-[10px] text-zinc-400">${msg.timeLabel}</span>
-      </div>
-    `
-    )
-    .join('');
-
-  const typingHtml = ui.chatTyping
-    ? `
-      <div class="flex items-start">
-        <div class="px-3.5 py-2.5 rounded-2xl bg-zinc-100 dark:bg-[#1E2127] text-zinc-500 dark:text-zinc-400 text-xs flex items-center gap-1.5">
-          <span>Thinking</span>
-          <span class="inline-flex gap-1">
-            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce"></span>
-            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style="animation-delay:0.12s"></span>
-            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style="animation-delay:0.24s"></span>
-          </span>
-        </div>
-      </div>
-    `
-    : '';
-
-  return `
-    <div class="fixed bottom-[76px] md:bottom-6 right-4 md:right-6 z-40 flex flex-col items-end gap-3">
-      ${
-        ui.chatOpen
-          ? `
-        <div
-          id="assistant-panel"
-          class="w-[calc(100vw-2rem)] sm:w-96 max-h-[72vh] rounded-3xl bg-white dark:bg-[#14161A] border border-zinc-200 dark:border-[#282B33] shadow-2xl flex flex-col overflow-hidden"
-          role="dialog"
-          aria-label="NutriSense AI Nutrition Assistant"
-        >
-          <div class="px-4 py-3.5 bg-zinc-50 dark:bg-[#191C22] border-b border-zinc-200 dark:border-[#262932] flex items-center justify-between gap-3">
-            <div>
-              <h3 class="font-display text-sm font-bold text-zinc-950 dark:text-white">Nutrition Assistant</h3>
-              <p class="text-[11px] text-zinc-500 dark:text-zinc-400">Informational guidance · Not medical advice</p>
-            </div>
-            <button
-              type="button"
-              data-action="close-chat"
-              aria-label="Close nutrition assistant"
-              class="w-8 h-8 rounded-full flex items-center justify-center bg-zinc-200/70 dark:bg-[#242830] text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white"
-            >${icon('x', 'w-4 h-4')}</button>
-          </div>
-
-          <div id="chat-scroll-body" class="flex-1 overflow-y-auto p-4 space-y-3 min-h-[220px] max-h-[340px]">
-            ${chatMessages}
-            ${typingHtml}
-          </div>
-
-          <!-- Quick Replies -->
-          <div class="px-4 py-2 border-t border-zinc-200 dark:border-[#23262E] flex gap-1.5 overflow-x-auto">
-            ${ASSISTANT_QUICK_REPLIES.map(
-              (q) => `
-              <button
-                type="button"
-                data-quick-reply="${q.replace(/"/g, '&quot;')}"
-                class="px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-[#1D2026] hover:bg-zinc-200 dark:hover:bg-[#262A32] text-[11px] font-medium text-zinc-700 dark:text-zinc-300 whitespace-nowrap shrink-0 transition-colors"
-              >${q}</button>
-            `
-            ).join('')}
-          </div>
-
-          <form id="assistant-form" class="p-3 border-t border-zinc-200 dark:border-[#23262E] flex items-center gap-2">
-            <label for="assistant-input" class="sr-only">Ask a nutrition question</label>
-            <input
-              id="assistant-input"
-              type="text"
-              placeholder="Ask about macros, illness foods..."
-              class="flex-1 px-3.5 py-2 rounded-xl bg-zinc-100 dark:bg-[#1C1F25] border border-zinc-200 dark:border-[#2B2E36] text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-[#B8F527]"
-            />
-            <button
-              type="submit"
-              aria-label="Send message"
-              class="w-9 h-9 rounded-xl bg-[#B8F527] hover:bg-[#A8E51B] text-zinc-950 flex items-center justify-center shrink-0 transition-colors"
-            >${icon('send', 'w-4 h-4')}</button>
-          </form>
-        </div>
-      `
-          : ''
-      }
-
-      <button
-        type="button"
-        data-action="toggle-chat"
-        aria-label="${ui.chatOpen ? 'Minimize nutrition assistant' : 'Open nutrition assistant'}"
-        class="h-11 px-3.5 sm:px-4 rounded-full bg-[#B8F527] hover:bg-[#A8E51B] text-zinc-950 font-semibold text-xs shadow-xl ring-4 ring-zinc-50 dark:ring-[#090A0C] flex items-center gap-2 transition-transform active:scale-95"
-      >
-        ${icon('message', 'w-4 h-4')}
-        <span class="hidden sm:inline">Ask Nutrition AI</span>
-      </button>
-    </div>
-  `;
-}
-
 export function bindModalsAndAssistantEvents(root) {
   const closeAuth = () => {
     store.setUI({ authModalOpen: false, authPrefillEmail: '', authSuccessMessage: '' });
@@ -961,29 +854,6 @@ export function bindModalsAndAssistantEvents(root) {
     })
   );
 
-  // Floating Assistant
-  root.querySelector('[data-action="toggle-chat"]')?.addEventListener('click', () => {
-    store.setUI({ chatOpen: !store.getUI().chatOpen });
-  });
-  root.querySelector('[data-action="close-chat"]')?.addEventListener('click', () => {
-    store.setUI({ chatOpen: false });
-  });
-  root.querySelectorAll('[data-quick-reply]').forEach((btn) =>
-    btn.addEventListener('click', () => {
-      store.sendChatMessage(btn.getAttribute('data-quick-reply'));
-    })
-  );
-  root.querySelector('#assistant-form')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const input = root.querySelector('#assistant-input');
-    if (input && input.value.trim()) {
-      store.sendChatMessage(input.value.trim());
-      input.value = '';
-    }
-  });
-
-  const scrollBody = root.querySelector('#chat-scroll-body');
-  if (scrollBody) {
-    scrollBody.scrollTop = scrollBody.scrollHeight;
-  }
+  // Agentic RAG AI Copilot
+  bindRagChatbotEvents(root);
 }
