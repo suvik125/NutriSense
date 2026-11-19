@@ -11,10 +11,10 @@ import {
   ILLNESS_OPTIONS,
   MEAL_CATALOG,
   RECOVERY_MEALS,
-  generateAssistantReply,
 } from '../data/catalog.js';
 import { supabase } from '../supabaseClient.js';
 import {
+  clearChatMessageRows,
   clearNotificationRows,
   deleteFoodLogRow,
   deleteNotificationRow,
@@ -30,6 +30,7 @@ import {
   upsertProfileHealthAndTargets,
   upsertSingleMealPlanItem,
 } from '../services/supabaseDb.js';
+import { processRagChatMessage } from '../services/ragChatbotService.js';
 import { showToast } from '../components/toast.js';
 import {
   DEFAULT_HYDRATION_GOAL,
@@ -54,6 +55,15 @@ const NOTIF_PREFS_STORAGE_KEY = 'nutrisense_notification_prefs_v1';
 const HYDRATION_STORAGE_KEY = 'nutrisense_hydration_v1';
 const MEAL_REMINDER_SENT_KEY = 'nutrisense_meal_reminders_sent_v1';
 const PRIVATE_VIEWS = new Set(['myfoods']);
+
+function createWelcomeChatMessage() {
+  return {
+    id: 'chat-welcome',
+    role: 'assistant',
+    text: 'Hello! I am **NutriSense AI Copilot** (RAG + System Control). Ask me about Bangladeshi/global food nutrition, control your meal plan, log water or meals, activate illness recovery mode, or export your data as an **A4 PDF**.',
+    timeLabel: 'Now',
+  };
+}
 
 function readStoredJSON(key) {
   if (typeof localStorage === 'undefined') {
@@ -388,14 +398,7 @@ export function createInitialState(preservedTheme = readStoredTheme()) {
       },
     },
     hydration: buildDefaultHydration(today),
-    chatHistory: [
-      {
-        id: 'chat-welcome',
-        role: 'assistant',
-        text: 'Hello! Ask me about macro targets, gentle foods when feeling unwell, or sodium and fiber balance. Nutrition estimates are informational and not medical advice.',
-        timeLabel: 'Now',
-      },
-    ],
+    chatHistory: [createWelcomeChatMessage()],
   };
 }
 
@@ -497,6 +500,7 @@ class NutriStore {
       profileSetupModalOpen: false,
       notificationsOpen: false,
       chatOpen: false,
+      chatExpanded: false,
       chatTyping: false,
       simulatedError: false,
       syncError: '',
@@ -1277,9 +1281,22 @@ class NutriStore {
     }
   }
 
-  sendChatMessage(text) {
+  async clearChatHistory() {
+    const welcomeMsg = createWelcomeChatMessage();
+    this.setState({ chatHistory: [welcomeMsg] });
+    if (this.isSupabaseUser()) {
+      const userId = this.state.authUserId;
+      await this.runDbSync(async () => {
+        await clearChatMessageRows(userId);
+        await insertChatMessage(userId, welcomeMsg);
+      });
+    }
+  }
+
+  async sendChatMessage(text) {
     const trimmed = String(text || '').trim();
-    if (!trimmed) return;
+    if (!trimmed || this.ui.chatTyping) return;
+
     const nowLabel = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const userMsg = { id: `chat-u-${Date.now()}`, role: 'user', text: trimmed, timeLabel: nowLabel };
 
@@ -1301,33 +1318,51 @@ class NutriStore {
         });
     }
 
-    setTimeout(async () => {
-    const reply = await generateAssistantReply(trimmed, this.state);
+    try {
+      const result = await processRagChatMessage(trimmed, this);
       const replyTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       const assistantMsg = {
         id: `chat-a-${Date.now()}`,
         role: 'assistant',
-        text: reply,
+        text: result.text,
         timeLabel: replyTime,
+        meta: result.meta || null,
       };
+
       this.setState((prev) => ({
         chatHistory: [...prev.chatHistory, assistantMsg],
       }));
-      this.setUI({ chatTyping: false });
 
       if (this.isSupabaseUser()) {
         const userId = this.state.authUserId;
         insertChatMessage(userId, assistantMsg)
           .then((saved) => {
             this.setState((prev) => ({
-              chatHistory: prev.chatHistory.map((m) => (m.id === assistantMsg.id ? saved : m)),
+              chatHistory: prev.chatHistory.map((m) =>
+                m.id === assistantMsg.id ? { ...saved, meta: assistantMsg.meta } : m
+              ),
             }));
           })
           .catch((err) => {
             this.setUI({ syncError: err?.message || 'Failed to save assistant reply.' });
           });
       }
-    }, 550);
+    } catch {
+      const replyTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      this.setState((prev) => ({
+        chatHistory: [
+          ...prev.chatHistory,
+          {
+            id: `chat-err-${Date.now()}`,
+            role: 'assistant',
+            text: 'Sorry, I encountered an unexpected issue while processing that request. Please try again.',
+            timeLabel: replyTime,
+          },
+        ],
+      }));
+    } finally {
+      this.setUI({ chatTyping: false });
+    }
   }
 
   cycleNutriNote(delta = 1) {
