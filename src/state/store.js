@@ -751,7 +751,11 @@ class NutriStore {
       if (session?.user && (!this.isSupabaseUser() || this._hydratedUserId !== session.user.id)) {
         await this.hydrateFromSupabase(session.user);
       }
-    } else if (window.location.pathname === '/login') {
+    } else if (view === 'docs') {
+      if (window.location.pathname !== '/docs') {
+        window.history.pushState(null, '', '/docs');
+      }
+    } else if (window.location.pathname === '/login' || window.location.pathname === '/docs') {
       window.history.pushState(null, '', '/');
     }
 

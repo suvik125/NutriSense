@@ -14,7 +14,8 @@ export function renderHeaderNav(state) {
   const unreadCount = state.notifications.filter((n) => !n.read).length;
   const isDark = state.theme === 'dark';
 
-  const desktopLinks = NAV_ITEMS.map((item) => {
+  const desktopNavItems = [...NAV_ITEMS, { id: 'docs', label: 'Docs / Pitch', iconName: 'book' }];
+  const desktopLinks = desktopNavItems.map((item) => {
     const active = state.activeView === item.id;
     return `
       <button
@@ -90,7 +91,7 @@ export function renderHeaderNav(state) {
 
   return `
     <!-- Desktop & Tablet Floating Top Navigation -->
-    <header class="sticky top-0 z-40 px-3 sm:px-6 pt-3">
+    <header class="print:hidden sticky top-0 z-40 px-3 sm:px-6 pt-3">
       <div class="max-w-7xl mx-auto h-14 px-4 sm:px-6 rounded-2xl bg-white/90 dark:bg-[#121417]/90 backdrop-blur-md border border-zinc-200 dark:border-[#24272E] flex items-center justify-between gap-4 md:gap-8">
         <!-- Zone 1: Brand Wordmark -->
         <button
@@ -149,7 +150,7 @@ export function renderHeaderNav(state) {
 
     <!-- Mobile Floating Capsule Bottom Navigation (matching reference bottom-right UI) -->
     <nav
-      class="md:hidden fixed bottom-3 left-3 right-3 z-40 max-w-md mx-auto"
+      class="print:hidden md:hidden fixed bottom-3 left-3 right-3 z-40 max-w-md mx-auto"
       aria-label="Mobile navigation"
     >
       <div class="bg-[#121417]/95 backdrop-blur-md border border-[#272A32] rounded-full p-1.5 flex items-center justify-between gap-1 shadow-2xl">

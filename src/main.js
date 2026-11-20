@@ -9,6 +9,7 @@ import { renderCalculatorView, bindCalculatorViewEvents } from './views/calculat
 import { renderPlannerView, bindPlannerViewEvents } from './views/plannerView.js';
 import { renderScannerView, bindScannerViewEvents } from './views/scannerView.js';
 import { renderMyFoodsView, bindMyFoodsViewEvents } from './views/myFoodsView.js';
+import { renderDocsView, bindDocsViewEvents } from './views/docsView.js';
 import { supabase } from './supabaseClient.js';
 
 const appRoot = document.getElementById('app');
@@ -43,6 +44,9 @@ function renderApp() {
     case 'myfoods':
       viewHtml = renderMyFoodsView(state, ui);
       break;
+    case 'docs':
+      viewHtml = renderDocsView(state, ui);
+      break;
     case 'home':
     default:
       viewHtml = renderHomeView(state, ui);
@@ -57,8 +61,14 @@ function renderApp() {
         ${viewHtml}
       </main>
 
-      <footer class="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-8 border-t border-zinc-200 dark:border-[#1E2127] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-zinc-500 dark:text-zinc-400">
-        <p>NutriSense · Personalized Nutrition &amp; Adaptive Diet Prototype</p>
+      <footer class="print:hidden w-full max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-8 border-t border-zinc-200 dark:border-[#1E2127] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+        <div class="flex flex-wrap items-center gap-3">
+          <p>NutriSense · Personalized Nutrition &amp; Adaptive Diet Prototype</p>
+          <span aria-hidden="true">·</span>
+          <button type="button" data-nav="docs" class="font-medium text-zinc-700 dark:text-zinc-300 hover:text-[#658C0A] dark:hover:text-[#B8F527] underline underline-offset-4 transition-colors">
+            Docs &amp; Pitch Deck (/docs)
+          </button>
+        </div>
         <p>Nutrition values are approximate. Wellness adaptations are informational and not medical advice.</p>
       </footer>
 
@@ -81,6 +91,9 @@ function renderApp() {
       break;
     case 'myfoods':
       bindMyFoodsViewEvents(appRoot);
+      break;
+    case 'docs':
+      bindDocsViewEvents(appRoot, renderApp);
       break;
     case 'home':
     default:
@@ -108,9 +121,11 @@ if (params.get('autostart') === '1') {
       ? 'Your account has been created. Please check your email and verify your address before logging in.'
       : '',
   });
+} else if (pathname === '/docs') {
+  store.setState({ activeView: 'docs' });
 } else {
   const requestedView = params.get('view') || (pathname === '/myfoods' ? 'myfoods' : null);
-  if (requestedView && ['home', 'calculator', 'planner', 'scanner', 'myfoods'].includes(requestedView)) {
+  if (requestedView && ['home', 'calculator', 'planner', 'scanner', 'myfoods', 'docs'].includes(requestedView)) {
     if (requestedView === 'myfoods') {
       store.setView('myfoods');
     } else {
@@ -153,8 +168,13 @@ window.addEventListener('popstate', () => {
     });
   } else if (window.location.pathname === '/myfoods') {
     store.setView('myfoods');
+  } else if (window.location.pathname === '/docs') {
+    store.setState({ activeView: 'docs' });
   } else {
     store.setUI({ authModalOpen: false, authPrefillEmail: '', authSuccessMessage: '' });
+    if (store.getState().activeView === 'docs') {
+      store.setState({ activeView: 'home' });
+    }
   }
 });
 

@@ -99,3 +99,16 @@
   background: rgba(161, 161, 170, 0.28);
   border-radius: 9999px;
 }
+
+@media print {
+  header,
+  footer,
+  nav,
+  .fixed {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #09090b !important;
+  }
+}
